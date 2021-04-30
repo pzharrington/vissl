@@ -1,0 +1,110 @@
+# @package _global_
+config:
+  VERBOSE: True
+  LOG_FREQUENCY: 100
+  TEST_ONLY: False
+  TEST_EVERY_NUM_EPOCH: 1
+  TEST_MODEL: True
+  SEED_VALUE: 1
+  MULTI_PROCESSING_METHOD: forkserver
+  HOOKS:
+    PERF_STATS:
+      MONITOR_PERF_STATS: True
+    TENSORBOARD_SETUP:
+      USE_TENSORBOARD: True
+      EXPERIMENT_LOG_DIR: "fullsup_specz"
+      LOG_PARAMS: False
+      LOG_PARAMS_GRADIENTS: False
+      FLUSH_EVERY_N_MIN: 1
+  DATA:
+    NUM_DATALOADER_WORKERS: 32
+    DECALS:
+      H5KEY_IMG: images
+      H5KEY_LAB: z_spec
+      SPECZ_RANGE: &specz_range [0.0, 1.2]
+      SPECZ_NBINS: &specz_nbins 256
+      DEREDDENED: True
+      FILTERS_USE: ['g', 'r', 'z']
+    TRAIN:
+      DATA_SOURCES: [decals_hdf5]
+      LABEL_SOURCES: [decals_hdf5]
+      DATASET_NAMES: [decals_specz]
+      BATCHSIZE_PER_REPLICA: 64
+      SUBSET: "/global/u2/p/pharring/self-sup_learning/decals/parhdf5/splits/south-z12_C0_1656278.npy"
+      DATA_LIMIT: 400000
+      TRANSFORMS:
+        - name: RandomRotateDecals
+        - name: CenterCropDecals
+          outdim: 96
+          jitter_lim: 7
+          uniform: False
+        - name: ToTensor
+    TEST:
+      DATA_SOURCES: [decals_hdf5]
+      LABEL_SOURCES: [decals_hdf5]
+      DATASET_NAMES: [decals_specz]
+      BATCHSIZE_PER_REPLICA: 256
+      TRANSFORMS:
+        - name: CenterCropDecals
+          outdim: 96
+          jitter_lim: 0
+          uniform: False
+        - name: ToTensor
+      SUBSET: "/global/u2/p/pharring/self-sup_learning/decals/parhdf5/splits/south-z12_C1_200000.npy"
+      DATA_LIMIT: 100000
+  METERS:
+    name: photoz_exp
+    photoz_exp:
+      specz_range: *specz_range
+      specz_nbins: *specz_nbins
+      max_num_samples: 25000
+  TRAINER:
+    TRAIN_STEP_NAME: standard_train_step
+  MODEL:
+    AMP_PARAMS:
+      USE_AMP: True
+    FEATURE_EVAL_SETTINGS:
+      EVAL_MODE_ON: True
+      EVAL_TRUNK_AND_HEAD: False
+    TRUNK:
+      NAME: resnext_decals
+      TRUNK_PARAMS:
+        RESNETS_DECALS:
+          DEPTH: 50
+          ZERO_INIT_RESIDUAL: True
+          CONV1_STRIDE1: True
+    HEAD:
+      # Note output dim must match DATA.DECALS.SPECZ_NBINS
+      PARAMS: [
+        ["mlp", {"dims": [2048, 256]}],
+      ]
+  LOSS:
+    name: cross_entropy_multiple_output_single_target
+    cross_entropy_multiple_output_single_target:
+      ignore_index: -1
+  OPTIMIZER:
+    name: sgd
+    weight_decay: 0.000
+    momentum: 0.9
+    num_epochs: 33
+    nesterov: False
+    regularize_bn: False
+    regularize_bias: False
+    param_schedulers:
+      lr:
+        values: [0.004, 0.0004, 0.00004]
+        milestones: [10, 20]
+        name: multistep
+        update_interval: epoch
+  DISTRIBUTED:
+    BACKEND: nccl
+    NUM_NODES: 1
+    NUM_PROC_PER_NODE: 1
+    INIT_METHOD: tcp
+    RUN_ID: auto
+  MACHINE:
+    DEVICE: gpu
+  CHECKPOINT:
+    DIR: "."
+    AUTO_RESUME: True
+    CHECKPOINT_FREQUENCY: 1

@@ -11,16 +11,18 @@ config:
       MONITOR_PERF_STATS: True
       ROLLING_BTIME_FREQ: 313
     TENSORBOARD_SETUP:
-        USE_TENSORBOARD: True
-        EXPERIMENT_LOG_DIR: "moco_v2_reference"
-        LOG_PARAMS: False
-        FLUSH_EVERY_N_MIN: 20
+      USE_TENSORBOARD: True
+      EXPERIMENT_LOG_DIR: "moco_v2_reference"
+      LOG_PARAMS: False
+      LOG_PARAMS_GRADIENTS: False
+      FLUSH_EVERY_N_MIN: 1
+      
   DATA:
     NUM_DATALOADER_WORKERS: 5
     TRAIN:
       DATA_SOURCES: [disk_folder]
-      DATASET_NAMES: [imagenet1k_folder]
-      BATCHSIZE_PER_REPLICA: 32
+      DATASET_NAMES: [imagenet1k_tmp]
+      BATCHSIZE_PER_REPLICA: 64
       LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used
       TRANSFORMS:
         - name: ImgReplicatePil
@@ -50,11 +52,14 @@ config:
     name: ""
   MODEL:
     TRUNK:
-      NAME: resnet
+      NAME: resnext_decals
       TRUNK_PARAMS:
-        RESNETS:
+        RESNETS_DECALS:
           DEPTH: 50
           ZERO_INIT_RESIDUAL: True
+          # Set the conv1 layer to use stride 1 for lower-dimensional images than ImageNet
+          CONV1_STRIDE1: True
+
     HEAD:
       PARAMS: [
         ["mlp", {"dims": [2048, 2048], "use_relu": True}],
@@ -77,15 +82,18 @@ config:
       weight_decay: 0.0001
       momentum: 0.9
       nesterov: True
-      num_epochs: 200
+      num_epochs: 1
       regularize_bn: True
       regularize_bias: True
       param_schedulers:
         lr:
-          name: multistep
-          values: [0.03, 0.003, 0.0003]
-          milestones: [120, 160]
-          update_interval: epoch
+          #name: multistep
+          #values: [0.03, 0.003, 0.0003]
+          #milestones:  [120, 160]
+          #update_interval: epoch
+          name: cosine
+          start_value: 0.03 
+          end_value: 0.0000
   DISTRIBUTED:
     BACKEND: nccl
     NUM_NODES: 1
@@ -98,3 +106,5 @@ config:
     AUTO_RESUME: True
     CHECKPOINT_FREQUENCY: 5
     CHECKPOINT_ITER_FREQUENCY: -1  # set this variable to checkpoint every few iterations
+
+

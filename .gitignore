@@ -94,3 +94,8 @@ website/pages/tutorials/*
 *-checkpoint.ipynb
 **/.ipynb_checkpoints
 **/.ipynb_checkpoints/**
+
+# Slurm stuff in decals folder
+decals/sout/*
+decals/*.sh
+decals/*.slr

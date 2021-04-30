@@ -130,5 +130,19 @@
     "google-imagenet1k-per10": {
         "train": ["<img_path>", "<lbl_path>"],
         "val": ["<img_path>", "<lbl_path>"]
+    },
+    "imagenet1k_tmp": {
+        "train": ["/tmp/train", "/tmp/train"],
+        "val": ["/tmp/val", "/tmp/val"]
+    },
+    "decals_test": {
+        "train": ["/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5", "<lbl_path>"],
+        "val": ["<img_path>", "<lbl_path>"]
+    },
+    "decals_specz": {
+        "train": ["/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5", 
+                  "/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5"],
+        "val": ["/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5", 
+                "/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5"]
     }
 }

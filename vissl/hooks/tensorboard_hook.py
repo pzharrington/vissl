@@ -13,6 +13,31 @@ from vissl.utils.activation_statistics import (
 )
 
 
+# NEW: imports for plotting sample imgs
+import numpy as np
+import matplotlib.pyplot as plt
+from vissl.utils.decals_rgb import dr2_rgb
+
+def visualize_img_batch(view1, view2):
+    # Only viz up to 4 from batch
+    bs = view1.shape[0]
+    vbs = min(bs, 4)
+    f = plt.figure(figsize=(vbs*2, 4))
+    for i in range(vbs):
+        plt.subplot(2,vbs,i+1)
+        plt.imshow(convert_decals_rgb(view1[i,:,:,:]))
+        plt.axis('off')
+        plt.subplot(2,vbs,i+1+vbs)
+        plt.imshow(convert_decals_rgb(view2[i,:,:,:]))
+        plt.axis('off')
+    return f
+
+def convert_decals_rgb(img):
+    img = img.transpose((1,2,0))
+    imgs = [img[:,:,i] for i in range(img.shape[-1])]
+    return dr2_rgb(imgs, ['g', 'r', 'z'])
+
+
 try:
     from torch.utils.tensorboard import SummaryWriter  # noqa F401
 
@@ -66,6 +91,7 @@ class SSLTensorboardHook(ClassyHook):
         log_params_every_n_iterations: int = -1,
         log_params_gradients: bool = False,
         log_activation_statistics: int = 0,
+        visualize_samples: bool = False,
     ) -> None:
         """The constructor method of SSLTensorboardHook.
 
@@ -78,6 +104,7 @@ class SSLTensorboardHook(ClassyHook):
                         should be logged to tensorboard
             log_params_gradients (bool): whether to log params gradients as well
                         to tensorboard.
+            visualize_samples (bool): whether to visualize batch samples for debugging
         """
         super().__init__()
         if not tb_available:
@@ -90,6 +117,7 @@ class SSLTensorboardHook(ClassyHook):
         self.log_params_every_n_iterations = log_params_every_n_iterations
         self.log_params_gradients = log_params_gradients
         self.log_activation_statistics = log_activation_statistics
+        self.visualize_samples = visualize_samples
         if self.log_activation_statistics > 0:
             self.activation_watcher = ActivationStatisticsMonitor(
                 observer=ActivationStatisticsTensorboardWatcher(tb_writer),
@@ -177,6 +205,15 @@ class SSLTensorboardHook(ClassyHook):
                                 scalar_value=round(acc, 5),
                                 global_step=task.train_phase_idx,
                             )
+                if 'photoz' in meter.name:
+                    for name, val in meter.value.items():
+                        tag_name = f"{phase_type}/photoz_" f" {name}"
+                        self.tb_writer.add_scalar(
+                            tag=tag_name,
+                            scalar_value=val,
+                            global_step=task.train_phase_idx,
+                        )
+
         if not (self.log_params or self.log_params_gradients):
             return
 
@@ -262,6 +299,15 @@ class SSLTensorboardHook(ClassyHook):
                 scalar_value=round(task.optimizer.options_view.lr, 5),
                 global_step=iteration,
             )
+
+            # Plot some images from the batch to tensorboard
+            if self.visualize_samples:
+                assert 'data_momentum' in task.last_batch.sample.keys(), 'Tensorboard sample visualizing currently only supported for MoCo'
+                view1 = task.last_batch.sample["input"]
+                view2 = task.last_batch.sample["data_momentum"]
+                fig = visualize_img_batch(view1.detach().cpu().numpy(), view2[0].detach().cpu().numpy())
+                self.tb_writer.add_figure('Samples/Augmented_views', fig, global_step=iteration, close=True)
+                
 
             # Batch processing time
             if len(task.batch_time) > 0:

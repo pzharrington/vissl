@@ -1,0 +1,36 @@
+config:
+  DATA:
+    DECALS:
+      H5KEY_IMG: images
+      H5KEY_LAB: specz
+      DEREDDENED: True
+      FILTERS_USE: &filters_use ['g', 'r', 'z']
+
+    TRAIN:
+      DATA_SOURCES: [decals_hdf5]
+      DATASET_NAMES: [decals_test]
+      BATCHSIZE_PER_REPLICA: 64
+      LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used atm
+      TRANSFORMS:
+        - name: ImgReplicatePil
+          num_times: 2
+        - name: ReddeningDecals
+          uniform: False
+          filters_use: *filters_use
+          ebv_max: 1.0
+        - name: RandomRotateDecals
+        - name: SizeScaleDecals
+          scale_min: 0.9
+          scale_max: 1.1
+        - name: GaussianBlurDecals
+          im_ch: 3
+          uniform: False
+        - name: CenterCropDecals
+          outdim: 96
+          jitter_lim: 7
+        - name: GaussianNoiseDecals
+          mean: 0
+          im_ch: 3
+          uniform: False
+        - name: ToTensor
+

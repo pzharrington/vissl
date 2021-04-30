@@ -11,6 +11,7 @@ from vissl.config import AttrDict
 from vissl.data import dataset_catalog
 from vissl.data.data_helper import balanced_sub_sampling, unbalanced_sub_sampling
 from vissl.data.ssl_transforms import get_transform
+from vissl.data.decals_h5_source import load_specz_labels
 from vissl.utils.env import get_machine_local_and_dist_rank
 
 
@@ -86,6 +87,11 @@ class GenericSSLDataset(Dataset):
         self.label_type = self.cfg["DATA"][split].LABEL_TYPE
         self.data_limit = self.cfg["DATA"][split].DATA_LIMIT
         self.data_limit_sampling = self._get_data_limit_sampling(cfg, split)
+        self.subset = self.cfg["DATA"][split].SUBSET
+        if self.subset:
+            self.subset_len = np.load(self.subset).shape[0]
+            assert self.subset_len >= self.data_limit, "DATA_LIMIT must be less than length of SUBSET indices"
+            logging.info('Loading %s subset indices from %s'%(split, self.subset))
         self.transform = get_transform(self.cfg["DATA"][split].TRANSFORMS)
         self._labels_init = False
         self._subset_initialized = False
@@ -209,6 +215,8 @@ class GenericSSLDataset(Dataset):
         See load_single_label_file().
         In case of disk_folder, we use the ImageFolder object created during the
         data loading itself.
+
+        NEW: In case of decals (specz) labels, we pull labels once, directly from file.
         """
         local_rank, _ = get_machine_local_and_dist_rank()
         for idx, label_source in enumerate(self.label_sources):
@@ -238,6 +246,17 @@ class GenericSSLDataset(Dataset):
                 # We do not create it again since it can be an expensive operation.
                 labels = [x[1] for x in self.data_objs[idx].image_dataset.samples]
                 labels = np.array(labels).astype(np.int64)
+            elif label_source == "decals_hdf5":
+                # Enforce that the data source also be decals_hdf5
+                assert self.data_sources[idx] == self.label_sources[idx], 'labels must come from same hdf5 source'
+                if local_rank == 0:
+                    logging.info(
+                        f"Using {label_source} labels from {self.data_paths[idx]}"
+                    )
+                # Pull directly from hdf5
+                labels = load_specz_labels(self.data_paths[idx], self.cfg)
+                labels = labels.astype(np.int64)
+
             elif label_source == "torchvision_dataset":
                 labels = np.array(self.data_objs[idx].get_labels()).astype(np.int64)
             else:
@@ -266,6 +285,14 @@ class GenericSSLDataset(Dataset):
         This function makes the assumption that there is one data source only
         or that all data sources have the same length (same as __getitem__).
         """
+
+        # Short-cut random sampling if subset specified manually
+        if self.subset:
+            self.image_and_label_subset = np.load(self.subset)
+            if self.data_limit >= 0:
+                self.image_and_label_subset = self.image_and_label_subset[:self.data_limit]
+            self._subset_initialized = True
+            return
 
         # Use one of the two random sampling strategies:
         # - unbalanced: random sampling is agnostic to labels
@@ -312,6 +339,13 @@ class GenericSSLDataset(Dataset):
             if not self._subset_initialized:
                 self._init_image_and_label_subset()
             subset_idx = self.image_and_label_subset[idx]
+        # decals_hdf5 source uses manual subset selection
+        elif self.subset:
+            if not self._subset_initialized:
+                self._init_image_and_label_subset()
+            subset_idx = self.image_and_label_subset[idx]
+                
+        
 
         # TODO: this doesn't yet handle the case where the length of datasets
         # could be different.
@@ -367,6 +401,8 @@ class GenericSSLDataset(Dataset):
         """
         if self.data_limit >= 0:
             return self.data_limit
+        elif self.subset:
+            return self.subset_len
         return len(self.data_objs[source_idx])
 
     def get_image_paths(self):

@@ -135,6 +135,8 @@ config:
       # if we want to log the model parameters every few iterations, set the iteration
       # frequency. -1 means the params will be logged only at the end of epochs.
       LOG_PARAMS_EVERY_N_ITERS: 310
+      # Whether or not to visualize training batch samples (for debugging)
+      VISUALIZE_SAMPLES: False
 
   # ----------------------------------------------------------------------------------- #
   # MONITORING
@@ -156,7 +158,23 @@ config:
     ENABLE_ASYNC_GPU_COPY: true
     # buffer size for gradient reduction. Set to 25 which is pytorch default.
     DDP_BUCKET_CAP_MB: 25
-    # Training Data Options
+    
+    # Decals-specific opts (reading h5 files)
+    DECALS:
+      # keyname in hdf5 file to acces images
+      H5KEY_IMG: images
+      # keyname in hdf5 to access target/labels for supervised training
+      H5KEY_LAB: z_spec
+      # specz range (min, max) for binned-classification
+      SPECZ_RANGE: [0.0, 1.2]
+      # number of specz bins for binned-classification
+      SPECZ_NBINS: 256
+      # Return de-reddened images (before potential re-redden augmentations)
+      DEREDDENED: True
+      # Which filters to use
+      FILTERS_USE: ['g', 'r', 'z']
+
+     # Training Data Options
     TRAIN:
       # if we want to resume the data sampler as well from a previous iteration. By default
       # pytorch sampler resumes from every epoch.
@@ -277,7 +295,12 @@ config:
         SEED: 0
         IS_BALANCED: False
         SKIP_NUM_SAMPLES: 0
-
+      #
+      # Specify a subset of indices for selection in decals hdf5 file
+      # SUBSET: '/path/to/idx/file' points to .npy file where indices are stored
+      # Careful using w/ DATA_LIMIT & associated params above! DATA_LIMIT can be used to restrict selection
+      # from subset, but SEED/IS_BALANCED/SKIP_NUM_SAMPLES have no effect if SUBSET is specified
+      SUBSET: ""
       # whether the data specified (whether file list or directory) should be copied locally
       # on the machine where training is happening.
       COPY_TO_LOCAL_DISK: False
@@ -316,6 +339,7 @@ config:
         SEED: 0
         IS_BALANCED: False
         SKIP_NUM_SAMPLES: 0
+      SUBSET: ""
       DATASET_NAMES: ["imagenet1k_folder"]
       COPY_TO_LOCAL_DISK: False
       COPY_DESTINATION_DIR: ""
@@ -344,6 +368,16 @@ config:
     # data size is too big, it could be hard to compute the meter on training set. Hence
     # we might want to disable it.
     enable_training_meter: True
+    # photo-z prediction from expectation over binned classification (range+nbins must match 
+    # those of config.DATA.DECALS). Computes sigmaMAD, delz, eta
+    photoz_exp:
+      # range and nbins must match those of config.DATA.DECALS
+      specz_range: [0., 1.2]
+      specz_nbins: 256
+      # maximum number of samples each meter (one meter per GPU process) tracks (save computation
+      # time for large datasets). For, e.g., 200k total samples to be used for computing metrics,
+      # set max_num_samples to be 200k/(DISTRIBUTED.NUM_PROC_PER_NODE*DISTRIBUTED.NUM_NODES)
+      max_num_samples: 200000
     # calculate top-k meter on single target multiple ouput setting
     accuracy_list_meter:
       # number of accuracy meters. In cases like linear evaluation of feature, we perform
@@ -493,6 +527,28 @@ config:
           # for the pixel-wise task. Torchvision default is stride=2 and all other models
           # use this so we set the default as 2.
           LAYER4_STRIDE: 2
+
+        # ------------------------------------------------------------- #
+        # ResNe(X)t params, modified for decals data
+        # ------------------------------------------------------------- #
+        RESNETS_DECALS:
+          DEPTH: 50
+          WIDTH_MULTIPLIER: 1
+          NORM: BatchNorm    # BatchNorm | LayerNorm
+          GROUPS: 1
+          # If using GroupNorm, this sets number of groups. Recommend 32 as a
+          # naive suggestion. GroupNorm only available for ResNe(X)t.
+          GROUPNORM_GROUPS: 32
+          # Use weight-standardized convolutions
+          STANDARDIZE_CONVOLUTIONS: False
+          ZERO_INIT_RESIDUAL: False
+          WIDTH_PER_GROUP: 64
+          # Colorization model uses stride=1 for last layer to retain higher spatial resolution
+          # for the pixel-wise task. Torchvision default is stride=2 and all other models
+          # use this so we set the default as 2.
+          LAYER4_STRIDE: 2
+          # Set the conv1 layer to use stride 1 for lower-dimensional images than ImageNet
+          CONV1_STRIDE1: True
 
         # ------------------------------------------------------------- #
         # EfficientNet params

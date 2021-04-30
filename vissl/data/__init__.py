@@ -19,6 +19,12 @@ from vissl.data.synthetic_dataset import SyntheticImageDataset
 from vissl.data.torchvision_dataset import TorchvisionDataset
 from vissl.utils.misc import setup_multiprocessing_method
 
+# NEW:
+# import numpy to properly set random seed
+import numpy as np
+# import custom data source
+from vissl.data.decals_h5_source import DecalsHDF5Dataset
+
 
 __all__ = [
     "GenericSSLDataset",
@@ -32,7 +38,14 @@ DATASET_SOURCE_MAP = {
     "disk_folder": DiskImageDataset,
     "torchvision_dataset": TorchvisionDataset,
     "synthetic": SyntheticImageDataset,
+    "decals_hdf5": DecalsHDF5Dataset
 }
+
+
+def np_seed_init(wrk_id):
+    np.random.seed(torch.utils.data.get_worker_info().seed%(2**32 - 1))
+    logging.info('WORKER %d: NPSEEDVAL %d'%(wrk_id, torch.utils.data.get_worker_info().seed%(2**32 - 1)))
+
 
 
 DATA_SOURCES_WITH_SUBSET_SUPPORT = {
@@ -162,7 +175,7 @@ def get_loader(
         collate_fn=collate_function,
         sampler=data_sampler,
         drop_last=dataset_config["DROP_LAST"],
-        worker_init_fn=worker_init_fn,
+        worker_init_fn=np_seed_init,
     )
 
     # If the targeted device is CUDA, set up async device copy:

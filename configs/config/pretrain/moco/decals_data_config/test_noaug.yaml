@@ -1,0 +1,24 @@
+config:
+  DATA:
+    # keyname in hdf5 file to acces images
+    H5KEY_IMG: images
+    # keyname in hdf5 to access target/labels for supervised training
+    H5KEY_LAB: specz
+    # Return de-reddened images (before potential re-redden augmentations)
+    DEREDDENED: True
+    # Which filters to use
+    FILTERS_USE: ['g', 'r', 'z']
+
+    TRAIN:
+      DATA_SOURCES: [decals_hdf5]
+      DATASET_NAMES: [decals_test]
+      BATCHSIZE_PER_REPLICA: 64
+      LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used atm
+      TRANSFORMS:
+        - name: ImgReplicatePil
+          num_times: 2
+        - name: CenterCropDecals
+          outdim: 96
+          jitter_lim: 7
+        - name: ToTensor
+
