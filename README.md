@@ -17,7 +17,7 @@ srun --pty --nodes=1 --ntasks=1 shifter --env HDF5_USE_FILE_LOCKING=FALSE --env 
 ```
 to setup an interactive session for the install. Then,
 ```
-cd \$HOME && git clone --recursive https://github.com/pzharrington/vissl.git && cd \$HOME/vissl/
+cd $HOME && git clone --recursive https://github.com/pzharrington/vissl.git && cd $HOME/vissl/
 pip install --user --progress-bar off -r requirements.txt
 pip install --user opencv-python
 pip uninstall -y classy_vision
