@@ -22,7 +22,7 @@ config:
       H5KEY_IMG: images
       H5KEY_LAB: z_spec
       SPECZ_RANGE: &specz_range [0.0, 1.2]
-      SPECZ_NBINS: &specz_nbins 256
+      SPECZ_NBINS: &specz_nbins 128
       DEREDDENED: True
       FILTERS_USE: ['g', 'r', 'z']
     TRAIN:
@@ -76,7 +76,7 @@ config:
     HEAD:
       # Note output dim must match DATA.DECALS.SPECZ_NBINS
       PARAMS: [
-        ["mlp", {"dims": [2048, 256]}],
+        ["mlp", {"dims": [2048, 128]}],
       ]
   LOSS:
     name: cross_entropy_multiple_output_single_target
@@ -93,7 +93,7 @@ config:
     param_schedulers:
       lr:
         values: [0.004, 0.0004, 0.00004]
-        milestones: [10, 20]
+        milestones: [15, 25]
         name: multistep
         update_interval: epoch
   DISTRIBUTED:

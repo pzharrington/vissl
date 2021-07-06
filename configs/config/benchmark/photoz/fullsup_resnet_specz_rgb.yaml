@@ -38,6 +38,7 @@ config:
           outdim: 96
           jitter_lim: 7
           uniform: False
+        - name: RGBifyDecals
         - name: ToTensor
     TEST:
       DATA_SOURCES: [decals_hdf5]
@@ -49,6 +50,7 @@ config:
           outdim: 96
           jitter_lim: 0
           uniform: False
+        - name: RGBifyDecals
         - name: ToTensor
       SUBSET: "/global/cfs/cdirs/cusp/LBL/decals_galaxy_survey/splits/south-z12_C1_200000.npy"
       DATA_LIMIT: 100000

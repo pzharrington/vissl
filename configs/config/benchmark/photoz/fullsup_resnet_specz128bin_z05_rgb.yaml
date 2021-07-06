@@ -21,8 +21,8 @@ config:
     DECALS:
       H5KEY_IMG: images
       H5KEY_LAB: z_spec
-      SPECZ_RANGE: &specz_range [0.0, 1.2]
-      SPECZ_NBINS: &specz_nbins 256
+      SPECZ_RANGE: &specz_range [0.0, 0.5]
+      SPECZ_NBINS: &specz_nbins 128
       DEREDDENED: True
       FILTERS_USE: ['g', 'r', 'z']
     TRAIN:
@@ -38,6 +38,7 @@ config:
           outdim: 96
           jitter_lim: 7
           uniform: False
+        - name: RGBifyDecals
         - name: ToTensor
     TEST:
       DATA_SOURCES: [decals_hdf5]
@@ -49,6 +50,7 @@ config:
           outdim: 96
           jitter_lim: 0
           uniform: False
+        - name: RGBifyDecals
         - name: ToTensor
       SUBSET: "/global/cfs/cdirs/cusp/LBL/decals_galaxy_survey/splits/south-z12_C1_200000.npy"
       DATA_LIMIT: 100000
@@ -76,7 +78,7 @@ config:
     HEAD:
       # Note output dim must match DATA.DECALS.SPECZ_NBINS
       PARAMS: [
-        ["mlp", {"dims": [2048, 256]}],
+        ["mlp", {"dims": [2048, 128]}],
       ]
   LOSS:
     name: cross_entropy_multiple_output_single_target
@@ -93,7 +95,7 @@ config:
     param_schedulers:
       lr:
         values: [0.004, 0.0004, 0.00004]
-        milestones: [10, 20]
+        milestones: [15, 25]
         name: multistep
         update_interval: epoch
   DISTRIBUTED:
