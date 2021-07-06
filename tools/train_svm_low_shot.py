@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import multiprocessing as mp
@@ -18,11 +21,7 @@ from vissl.models.model_helpers import get_trunk_output_feature_names
 from vissl.utils.checkpoint import get_checkpoint_folder
 from vissl.utils.distributed_launcher import launch_distributed
 from vissl.utils.env import set_env_vars
-from vissl.utils.hydra_config import (
-    convert_to_attrdict,
-    is_hydra_available,
-    print_cfg,
-)
+from vissl.utils.hydra_config import convert_to_attrdict, is_hydra_available, print_cfg
 from vissl.utils.io import load_file
 from vissl.utils.logger import setup_logging, shutdown_logging
 from vissl.utils.misc import merge_features
@@ -40,9 +39,9 @@ def train_voc07_low_shot(
     low_shot_trainer = SVMLowShotTrainer(
         cfg["SVM"], layer=layername, output_dir=output_dir
     )
-    train_data = merge_features(output_dir, "train", layername, cfg)
+    train_data = merge_features(output_dir, "train", layername)
     train_features, train_targets = train_data["features"], train_data["targets"]
-    test_data = merge_features(output_dir, "test", layername, cfg)
+    test_data = merge_features(output_dir, "test", layername)
     test_features, test_targets = test_data["features"], test_data["targets"]
     # now we want to create the low-shot samples based on the kind of dataset.
     # We only create low-shot samples for training. We test on the full dataset.
@@ -82,11 +81,11 @@ def train_sample_places_low_shot(
 
     for low_shot_kvalue in k_values:
         checkpoint_dir = f"{output_dir}/sample{sample_num}_k{low_shot_kvalue}"
-        train_data = merge_features(checkpoint_dir, "train", layername, cfg)
+        train_data = merge_features(checkpoint_dir, "train", layername)
         train_features = train_data["features"]
         train_targets = train_data["targets"]
         checkpoint_dir = f"{output_dir}/sample{sample_inds[0]}_k{k_values[0]}"
-        test_data = merge_features(checkpoint_dir, "test", layername, cfg)
+        test_data = merge_features(checkpoint_dir, "test", layername)
         test_features = test_data["features"]
         test_targets = test_data["targets"]
         low_shot_trainer.train(

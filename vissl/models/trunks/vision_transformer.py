@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 """
 Code modified from https://github.com/rwightman/pytorch-image-models/blob/master/timm/models/vision_transformer.py # NOQA
@@ -10,6 +13,7 @@ Leavitt (ito@fb.com, matthew.l.leavitt@gmail.com) and Vedanuj Goswami
 import copy
 import logging
 import math
+from functools import partial
 from typing import List
 
 import torch
@@ -164,9 +168,7 @@ class VisionTransformer(nn.Module):
         super().__init__()
 
         assert model_config.INPUT_TYPE in ["rgb", "bgr"], "Input type not supported"
-        trunk_config = copy.deepcopy(
-            model_config.TRUNK.TRUNK_PARAMS.VISION_TRANSFORMERS
-        )
+        trunk_config = copy.deepcopy(model_config.TRUNK.VISION_TRANSFORMERS)
 
         logging.info("Building model: Vision Transformer from yaml config")
         # Hacky workaround
@@ -188,7 +190,7 @@ class VisionTransformer(nn.Module):
         # TODO Implement hybrid backbones
         if "HYBRID" in trunk_config.keys():
             hybrid_backbone_string = trunk_config.HYBRID
-        norm_layer = nn.LayerNorm
+        norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
         self.num_features = (
             self.embed_dim

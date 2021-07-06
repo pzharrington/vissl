@@ -1,12 +1,24 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import pprint
 import sys
 from typing import Any, List
 
+import torch
 from omegaconf import DictConfig, OmegaConf
 from vissl.config import AttrDict, check_cfg_version
+from vissl.utils.io import save_file
+
+
+def save_attrdict_to_disk(cfg: AttrDict):
+    from vissl.utils.checkpoint import get_checkpoint_folder
+
+    yaml_output_file = f"{get_checkpoint_folder(cfg)}/train_config.yaml"
+    save_file(cfg.to_dict(), yaml_output_file)
 
 
 def convert_to_attrdict(cfg: DictConfig, cmdline_args: List[Any] = None):
@@ -39,8 +51,21 @@ def convert_to_attrdict(cfg: DictConfig, cmdline_args: List[Any] = None):
 
     # assert the config and infer
     config = cfg.config
-    assert_hydra_conf(config)
+    infer_and_assert_hydra_config(config)
+    save_attrdict_to_disk(config)
+    convert_fsdp_dtypes(config)
     return cfg, config
+
+
+def convert_fsdp_dtypes(config: AttrDict):
+    """
+    Transform configuration types (primitive types) to VISSL specific types
+    """
+    # TODO (Quentin) - remove this once FSDP accepts a boolean
+    if config["MODEL"]["FSDP_CONFIG"]["compute_dtype"] == "float32":
+        config["MODEL"]["FSDP_CONFIG"]["compute_dtype"] = torch.float32
+    else:
+        config["MODEL"]["FSDP_CONFIG"]["compute_dtype"] = torch.float16
 
 
 def is_hydra_available():
@@ -192,7 +217,10 @@ def infer_learning_rate(cfg):
               base_value = base learning rate value that will be scaled,
               The current batch size is used to determine how to scale the base learning rate
               value.
-        scaled_lr = ((batchsize_per_gpu * world_size) * base_value ) / base_lr_batch_size
+        scale_factor = (batchsize_per_gpu * world_size) / base_lr_batch_size
+        if scaling_type is sqrt, scale factor = sqrt(scale_factor)
+        scaled_lr = scale_factor * base_value
+
 
     We perform this auto-scaling for head learning rate as well if user wants to use a different
     learning rate for the head
@@ -208,7 +236,15 @@ def infer_learning_rate(cfg):
         param_schedulers = cfg.OPTIMIZER.param_schedulers.lr
         base_lr = param_schedulers.auto_lr_scaling.base_value
         base_lr_batch_size = param_schedulers.auto_lr_scaling.base_lr_batch_size
+        scaling_type = param_schedulers.auto_lr_scaling.scaling_type
+        assert scaling_type in [
+            "sqrt",
+            "linear",
+        ], "Only linear | sqrt scaling_types are supported"
+
         scale_factor = float(batch_size) / base_lr_batch_size
+        if scaling_type == "sqrt":
+            scale_factor = scale_factor ** 0.5
         scaled_lr = base_lr * scale_factor
         cfg.OPTIMIZER.param_schedulers.lr = get_scaled_lr_scheduler(
             cfg, param_schedulers, scaled_lr
@@ -223,22 +259,31 @@ def infer_learning_rate(cfg):
         and cfg.OPTIMIZER.param_schedulers.lr_head
         and cfg.OPTIMIZER.param_schedulers.lr_head.auto_lr_scaling.auto_scale
     ):
-        # if the user wants a different LR value for the head, then we automatically
-        # infer the LR values for the head as well (similar to trunk above)
+        # if the user wants a different LR value for the head, then we
+        # automatically infer the LR values for the head as well (similar to
+        # trunk above)
         world_size = cfg.DISTRIBUTED.NUM_NODES * cfg.DISTRIBUTED.NUM_PROC_PER_NODE
         batch_size = cfg.DATA.TRAIN.BATCHSIZE_PER_REPLICA * world_size
         param_schedulers = cfg.OPTIMIZER.param_schedulers.lr_head
         base_lr = param_schedulers.auto_lr_scaling.base_value
         base_lr_batch_size = param_schedulers.auto_lr_scaling.base_lr_batch_size
+        scaling_type = param_schedulers.auto_lr_scaling.scaling_type
+        assert scaling_type in [
+            "sqrt",
+            "linear",
+        ], "Only linear | sqrt scaling_types are supported"
+
         scale_factor = float(batch_size) / base_lr_batch_size
+        if scaling_type == "sqrt":
+            scale_factor = scale_factor ** 0.5
         scaled_lr = base_lr * scale_factor
         cfg.OPTIMIZER.param_schedulers.lr_head = get_scaled_lr_scheduler(
             cfg, param_schedulers, scaled_lr
         )
 
-    # for the head, if we want to use a different weight decay value, we verify that
-    # the specified weight decay value is valid. Otherwise, we do the inference
-    # and set the weight decay value same as the trunk.
+    # for the head, if we want to use a different weight decay value,
+    # we verify that the specified weight decay value is valid. Otherwise,
+    # we do the inference and set the weight decay value same as the trunk.
     if not cfg.OPTIMIZER.head_optimizer_params.use_different_wd:
         cfg.OPTIMIZER.head_optimizer_params.weight_decay = cfg.OPTIMIZER.weight_decay
     else:
@@ -256,6 +301,16 @@ def infer_losses_config(cfg):
     Each loss has additional set of parameters that can be inferred to ensure smooth
     training in case user forgets to adjust all the parameters.
     """
+    train_transforms = cfg.DATA.TRAIN.TRANSFORMS
+    total_num_crops = next(
+        (
+            transform["total_num_crops"]
+            for transform in train_transforms
+            if "total_num_crops" in transform
+        ),
+        None,
+    )
+
     # some inference for the Info-NCE loss.
     if "simclr_info_nce_loss" in cfg.LOSS.name:
         cfg.LOSS[cfg.LOSS.name]["buffer_params"]["world_size"] = (
@@ -278,12 +333,13 @@ def infer_losses_config(cfg):
     if cfg.LOSS.name == "multicrop_simclr_info_nce_loss":
         world_size = cfg.LOSS.multicrop_simclr_info_nce_loss.buffer_params.world_size
         batch_size = cfg.DATA.TRAIN.BATCHSIZE_PER_REPLICA
-        total_num_crops = cfg.DATA.TRAIN.TRANSFORMS[0]["total_num_crops"]
         cfg.LOSS.multicrop_simclr_info_nce_loss.buffer_params.world_size = world_size
         cfg.LOSS.multicrop_simclr_info_nce_loss.buffer_params.effective_batch_size = (
             batch_size * world_size
         )
-        cfg.LOSS.multicrop_simclr_info_nce_loss.num_crops = total_num_crops
+        cfg.LOSS.multicrop_simclr_info_nce_loss.num_crops = (
+            total_num_crops or cfg.LOSS.multicrop_simclr_info_nce_loss.num_crops
+        )
         cfg.DATA.TRAIN.COLLATE_FUNCTION = "multicrop_collator"
 
     # some inference for the DeepCluster-v2 loss.
@@ -292,15 +348,15 @@ def infer_losses_config(cfg):
         cfg.LOSS.deepclusterv2_loss.BATCHSIZE_PER_REPLICA = (
             cfg.DATA.TRAIN.BATCHSIZE_PER_REPLICA
         )
-        cfg.LOSS.deepclusterv2_loss.num_crops = cfg.DATA.TRAIN.TRANSFORMS[0][
-            "total_num_crops"
-        ]
+        cfg.LOSS.deepclusterv2_loss.num_crops = (
+            total_num_crops or cfg.LOSS.deepclusterv2_loss.num_crops
+        )
         cfg.DATA.TRAIN.COLLATE_FUNCTION = "multicrop_collator"
 
     # some inference for the SwAV loss.
     if cfg.LOSS.name == "swav_loss":
         assert len(cfg.MODEL.HEAD.PARAMS) == 1
-        assert cfg.MODEL.HEAD.PARAMS[0][0] == "swav_head"
+        assert cfg.MODEL.HEAD.PARAMS[0][0] in {"swav_head", "swav_head_fsdp"}
         assert cfg.DATA.TRAIN.COLLATE_FUNCTION in [
             "multicrop_collator",
             "multicrop_mixup_collator",
@@ -311,7 +367,7 @@ def infer_losses_config(cfg):
         )
         cfg.LOSS.swav_loss.num_prototypes = cfg.MODEL.HEAD.PARAMS[0][1]["num_clusters"]
         cfg.LOSS.swav_loss.embedding_dim = cfg.MODEL.HEAD.PARAMS[0][1]["dims"][-1]
-        cfg.LOSS.swav_loss.num_crops = cfg.DATA.TRAIN.TRANSFORMS[0]["total_num_crops"]
+        cfg.LOSS.swav_loss.num_crops = total_num_crops or cfg.LOSS.swav_loss.num_crops
         from vissl.utils.checkpoint import get_checkpoint_folder
 
         cfg.LOSS.swav_loss.output_dir = get_checkpoint_folder(cfg)
@@ -333,9 +389,10 @@ def infer_losses_config(cfg):
         cfg.LOSS.swav_momentum_loss.embedding_dim = cfg.MODEL.HEAD.PARAMS[0][1]["dims"][
             -1
         ]
-        cfg.LOSS.swav_momentum_loss.num_crops = cfg.DATA.TRAIN.TRANSFORMS[0][
-            "total_num_crops"
-        ]
+
+        cfg.LOSS.swav_momentum_loss.num_crops = (
+            total_num_crops or cfg.LOSS.swav_momentum_loss.num_crops
+        )
         cfg.DATA.TRAIN.COLLATE_FUNCTION = "multicrop_collator"
         world_size = cfg.DISTRIBUTED.NUM_NODES * cfg.DISTRIBUTED.NUM_PROC_PER_NODE
         batch_size = cfg.DATA.TRAIN.BATCHSIZE_PER_REPLICA
@@ -346,10 +403,19 @@ def infer_losses_config(cfg):
         cfg.LOSS.swav_momentum_loss.queue.local_queue_length = (
             queue_length // world_size
         )
+
+    # some inference for Simdist loss.
+    if cfg.LOSS.name == "dino_loss":
+        assert len(cfg.MODEL.HEAD.PARAMS) == 1
+        assert cfg.MODEL.HEAD.PARAMS[0][0] == "swav_head"
+        cfg.LOSS.dino_loss.output_dim = cfg.MODEL.HEAD.PARAMS[0][1]["num_clusters"][0]
+        cfg.LOSS.dino_loss.num_crops = total_num_crops or cfg.LOSS.dino_loss.num_crops
+        cfg.DATA.TRAIN.COLLATE_FUNCTION = "multicrop_collator"
+
     return cfg
 
 
-def assert_hydra_conf(cfg):
+def infer_and_assert_hydra_config(cfg):
     """
     Infer values of few parameters in the config file using the value of other config parameters
     1. Inferring losses
@@ -367,6 +433,12 @@ def assert_hydra_conf(cfg):
     """
     cfg = infer_losses_config(cfg)
     cfg = infer_learning_rate(cfg)
+
+    # pass the seed to cfg["MODEL"] so that model init on different nodes can
+    # use the same seed.
+    # TODO (Min): once FSDP supports sync'ing weights from rank 0, we don't need
+    #             this anymore.
+    cfg["MODEL"]["_MODEL_INIT_SEED"] = cfg.SEED_VALUE
 
     # in case of linear evaluation, we often evaluate several layers at a time. For each
     # layer, there's a separate accuracy meter. In such case, we want to output the layer
@@ -427,6 +499,15 @@ def assert_hydra_conf(cfg):
         )
         cfg.MODEL.WEIGHTS_INIT.PARAMS_FILE = cached_url_path
 
+    # ZeRO2: Infer the settings for ShardedDDP which shards the optimizer state
+    # and the model weights. For ShardedDDP, we must use the OSS optimizer,
+    # set the right task name, use the PyTorch AMP if AMP is used.
+    if cfg.MODEL.SHARDED_DDP_SETUP.USE_SDP:
+        cfg.OPTIMIZER.use_zero = True
+        cfg.TRAINER.TASK_NAME = "self_supervision_sdp_task"
+        if cfg.MODEL.AMP_PARAMS.USE_AMP:
+            cfg.MODEL.AMP_PARAMS.AMP_TYPE = "pytorch"
+
     # if we use a zero optimizer, we nest the optimizer related settings under the
     # base_optimizer.
     if cfg.OPTIMIZER.use_zero:
@@ -438,3 +519,61 @@ def assert_hydra_conf(cfg):
         del cfg.OPTIMIZER.base_optimizer["num_epochs"]
         del cfg.OPTIMIZER.base_optimizer["use_zero"]
         del cfg.OPTIMIZER.base_optimizer["head_optimizer_params"]
+
+    # inference for the FSDP settings. Conditions are:
+    # 1) use the FSDP task
+    # 2) use the single param group in the optimizer
+    # 3) if AMP is used, it must be PyTorch AMP
+    # 4) If training SwAV, we automatically set the head to SwAV FSDP head
+    # 4) Inference for the FSDP parameters to ensure the good convergence
+    if cfg.MODEL.FSDP_CONFIG.AUTO_SETUP_FSDP:
+        cfg.TRAINER.TASK_NAME = "self_supervision_fsdp_task"
+        cfg.OPTIMIZER.construct_single_param_group_only = True
+
+        # safely set flatten_parameters=True for FSDP trainings.
+        cfg["MODEL"]["FSDP_CONFIG"]["flatten_parameters"] = True
+        # recommended FSDP settings below for the convergence
+        cfg["MODEL"]["FSDP_CONFIG"]["compute_dtype"] = "float32"
+
+        # Inference of optimizer configuration
+        if cfg["OPTIMIZER"]["use_larc"]:
+            cfg["OPTIMIZER"]["name"] = "sgd_fsdp"
+
+        # AMP based inference
+        if cfg["MODEL"]["AMP_PARAMS"]["USE_AMP"]:
+            cfg["MODEL"]["AMP_PARAMS"]["AMP_TYPE"] = "pytorch"
+            cfg["MODEL"]["FSDP_CONFIG"]["mixed_precision"] = True
+            cfg["MODEL"]["FSDP_CONFIG"]["fp32_reduce_scatter"] = True
+        else:
+            # if not using AMP, we can't use mixed_precision as it requires PyTorch AMP
+            cfg["MODEL"]["FSDP_CONFIG"]["mixed_precision"] = False
+            # if mixed_precision=False, FSDP mandates setting fp32_reduce_scatter=False
+            cfg["MODEL"]["FSDP_CONFIG"]["fp32_reduce_scatter"] = False
+
+        # Inference of the head in case of training with FSDP
+        for i, head_param in enumerate(cfg.MODEL.HEAD.PARAMS):
+            if head_param[0] == "swav_head":
+                cfg.MODEL.HEAD.PARAMS[i][0] = "swav_head_fsdp"
+            if head_param[0] == "eval_mlp":
+                cfg.MODEL.HEAD.PARAMS[i][0] = "eval_mlp_fsdp"
+            if head_param[0] == "mlp":
+                cfg.MODEL.HEAD.PARAMS[i][0] = "mlp_fsdp"
+
+        # Inference of the trunk in case of training with FSDP
+        if cfg.MODEL.TRUNK.NAME == "regnet":
+            cfg.MODEL.TRUNK.NAME = "regnet_fsdp"
+
+        # Profiling the communication requires some setup for FSDP
+        if cfg.PROFILING.MEMORY_PROFILING.TRACK_BY_LAYER_MEMORY:
+            cfg["MODEL"]["FSDP_CONFIG"]["_TRACK_COMMUNICATIONS"] = True
+
+        logging.info(f"Using the FSDP config: {cfg.MODEL.FSDP_CONFIG}")
+
+    # Delete the AUTO_SETUP_FSDP key since we send the FSDP_CONFIG
+    # to FSDP from fairscale which doesn't know about AUTO_SETUP_FSDP
+    del cfg.MODEL.FSDP_CONFIG["AUTO_SETUP_FSDP"]
+
+    if cfg.DATA.TRAIN.BASE_DATASET == "generic_ssl":
+        assert (
+            cfg.DATA.TRAIN.get("TRAIN_PHASES_PER_EPOCH", 1) == 1
+        ), "When using the generic_ssl, we must set TRAIN_PHASES_PER_EPOCH = 1."

@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import os
@@ -26,6 +29,15 @@ def set_env_vars(local_rank: int, node_id: int, cfg: AttrDict):
             f"using NCCL_SOCKET_NTHREADS: {cfg.DISTRIBUTED.NCCL_SOCKET_NTHREADS}"
         )
         os.environ["NCCL_SOCKET_NTHREADS"] = str(cfg.DISTRIBUTED.NCCL_SOCKET_NTHREADS)
+
+
+def setup_path_manager():
+    """
+    Registering the right options for the PathManager:
+    Override this function in your build system to
+    support different distributed file system
+    """
+    pass
 
 
 def print_system_env_info(current_env):

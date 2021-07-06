@@ -1,10 +1,14 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import gc
 import logging
 
 import torch
-from classy_vision.generic.util import copy_model_to_gpu, load_and_broadcast_checkpoint
+from classy_vision.generic.util import copy_model_to_gpu
+from classy_vision.hooks import ClassyHook
 from classy_vision.losses import build_loss
 from classy_vision.meters import build_meter
 from classy_vision.optim import build_optimizer, build_optimizer_schedulers
@@ -13,11 +17,15 @@ from classy_vision.tasks.classification_task import AmpType, BroadcastBuffersMod
 from fvcore.common.file_io import PathManager
 from torch.cuda.amp import GradScaler as TorchGradScaler
 from vissl.config import AttrDict
-from vissl.data import build_dataset, get_loader, print_sampler_config
+from vissl.data import (
+    build_dataloader,
+    build_dataset,
+    print_sampler_config,
+)
 from vissl.models import build_model, convert_sync_bn
 from vissl.optimizers import get_optimizer_param_groups
 from vissl.utils.activation_checkpointing import manual_gradient_reduction
-from vissl.utils.checkpoint import init_model_from_weights
+from vissl.utils.checkpoint import CheckpointLoader
 from vissl.utils.misc import is_apex_available, is_fairscale_sharded_available
 
 
@@ -38,7 +46,6 @@ class SelfSupervisionTask(ClassificationTask):
     Task also supports 2 additional things:
     1) converts the model BatchNorm layers to the synchronized batchnorm
     2) sets mixed precision (apex and pytorch both supported)
-
     """
 
     def __init__(self, config: AttrDict):
@@ -164,41 +171,38 @@ class SelfSupervisionTask(ClassificationTask):
 
             # This will rightly fail if the setting is not correct
             self.amp_type = AmpType[self.config.MODEL.AMP_PARAMS.AMP_TYPE.upper()]
-
-            # Check Apex availability
             if self.amp_type == AmpType.APEX:
-                if not is_apex_available():
-                    raise RuntimeError(
-                        "Apex is not available. Can't use mixed precision"
-                    )
-
-                # "amp_args" are actually Apex Amp args
-                self.amp_args = self.config.MODEL.AMP_PARAMS.AMP_ARGS
-                logging.info(f"Setting AMP: using apex, args {self.amp_args}")
-
+                self._init_apex_grad_scaler()
             elif self.amp_type == AmpType.PYTORCH:
-                # if the optimizer is sharded or FSDP data parallel is used, then the GradScaler
-                # needs to be shard-aware.
-                if (
-                    self.config["TRAINER"]["TASK_NAME"] == "self_supervision_fsdp_task"
-                    or self.config["OPTIMIZER"]["name"] == "zero"
-                ):
-                    assert is_fairscale_sharded_available(), (
-                        "To use ZeRO with PyTorch AMP, ShardedGradScaler() "
-                        "from fairscale is needed. Please upgrade fairscale"
-                    )
-                    from fairscale.optim.grad_scaler import ShardedGradScaler
-
-                    self.amp_grad_scaler = ShardedGradScaler()
-                    logging.info("Setting AMP: using sharded grad scaler")
-                else:
-                    self.amp_grad_scaler = TorchGradScaler()
-                    logging.info("Setting AMP: using pytorch grad scaler")
+                self._init_pytorch_grad_scaler()
             logging.info(f"Setting AMP: {self.amp_type} - args: {self.amp_args}")
 
         else:
             self.amp_args, self.amp_type = None, None
             logging.info("Not using Automatic Mixed Precision")
+
+    def _init_apex_grad_scaler(self):
+        # Check Apex availability
+        if not is_apex_available():
+            raise RuntimeError("Apex is not available. Can't use mixed precision")
+
+        # "amp_args" are actually Apex Amp args
+        self.amp_args = self.config.MODEL.AMP_PARAMS.AMP_ARGS
+        logging.info(f"Setting AMP: using apex, args {self.amp_args}")
+
+    def _init_pytorch_grad_scaler(self):
+        if self.config["OPTIMIZER"]["name"] == "zero":
+            assert is_fairscale_sharded_available(), (
+                "To use ZeRO with PyTorch AMP, ShardedGradScaler() "
+                "from fairscale is needed. Please upgrade fairscale"
+            )
+            from fairscale.optim.grad_scaler import ShardedGradScaler
+
+            self.amp_grad_scaler = ShardedGradScaler()
+            logging.info("Setting AMP: using sharded grad scaler")
+        else:
+            self.amp_grad_scaler = TorchGradScaler()
+            logging.info("Setting AMP: using pytorch grad scaler")
 
     def set_checkpoint_path(self, checkpoint_path: str):
         """
@@ -229,7 +233,26 @@ class SelfSupervisionTask(ClassificationTask):
         Create the task from the yaml config input.
         """
         test_only = config.TEST_ONLY
-        return cls(config).set_available_splits().set_test_only(test_only)
+
+        return (
+            cls(config)
+            .set_available_splits()
+            .set_test_only(test_only)
+            .set_epoch_phase_info()
+        )
+
+    def set_epoch_phase_info(self):
+        # In case optimizer doesn't exist. E.g. for feature extraction.
+        optimizer = getattr(self.config, "OPTIMIZER", {})
+        self.num_epochs = getattr(optimizer, "num_epochs", 1)
+        self.num_train_phases_per_epoch = getattr(
+            self.config["DATA"]["TRAIN"], "TRAIN_PHASES_PER_EPOCH", 1
+        )
+        self.num_train_phases = (
+            self.config["OPTIMIZER"]["num_epochs"] * self.num_train_phases_per_epoch
+        )
+
+        return self
 
     # We keep the function because this is used by hooks like checkpoint etc.
     def get_config(self):
@@ -250,16 +273,19 @@ class SelfSupervisionTask(ClassificationTask):
         interleaved. We also add the test phases every TEST_EVERY_NUM_EPOCH if
         we don't want the tst to run after every test phase.
         """
-        num_epochs = self.config["OPTIMIZER"]["num_epochs"]
         if not self.config["TEST_ONLY"]:
-            phases = [{"train": True} for _ in range(num_epochs)]
+            phases = [{"train": True} for _ in range(self.num_train_phases)]
             # whether the model is train or test only. If the model is not test
             # only, then whether we do test as well or not, is decided from the
             # config file.
-            test_every = self.config.get("TEST_EVERY_NUM_EPOCH", 1)
+            test_every = (
+                self.config.get("TEST_EVERY_NUM_EPOCH", 1)
+                * self.num_train_phases_per_epoch
+            )
             output_phases = []
             for idx, phase in enumerate(phases):
                 output_phases.append(phase)
+
                 if idx % test_every == 0 or idx == (len(phases) - 1):
                     output_phases.append({"train": False})
             # we do a little surgery here. Either the phases are test only or
@@ -269,36 +295,46 @@ class SelfSupervisionTask(ClassificationTask):
             if not self.config["TEST_MODEL"]:
                 output_phases = [phase for phase in output_phases if phase["train"]]
         else:
-            output_phases = [{"train": False} for _ in range(num_epochs)]
+            output_phases = [{"train": False} for _ in range(self.num_train_phases)]
         return output_phases
 
-    def build_datasets(self):
+    def build_datasets(self, current_train_phase_idx=0):
         """
         Get the datasets for the data splits we will use in the training. The
         set_available_splits variable determines the splits used in the training.
         """
         datasets, data_and_label_keys = {}, {}
         for split in self.available_splits:
-            datasets[split] = build_dataset(self.config, split)
+            datasets[split.lower()] = build_dataset(
+                cfg=self.config,
+                split=split,
+                current_train_phase_idx=current_train_phase_idx,
+            )
             data_and_label_keys["input"] = self.config.DATA[split].INPUT_KEY_NAMES
             data_and_label_keys["target"] = self.config.DATA[split].TARGET_KEY_NAMES
+
         return datasets, data_and_label_keys
 
-    def build_dataloaders(self, pin_memory: bool) -> torch.utils.data.DataLoader:
+    def build_dataloaders(
+        self, pin_memory: bool, current_train_phase_idx=0
+    ) -> torch.utils.data.DataLoader:
         """
-        Build PyTorch dataloaders for all the available_splits. We construct the
+        Build PyTorch dataloaders for all the available_splits. By default, we construct the
         standard PyTorch Dataloader and allow setting all dataloader options.
         """
-        self.datasets, self.data_and_label_keys = self.build_datasets()
+        # Gives sampler same seed for entire distributed group as per pytorch documentation.
+        sampler_seed = self.config["SEED_VALUE"]
 
         loaders = {
-            split.lower(): get_loader(
-                dataset=self.datasets[split],
+            split.lower(): build_dataloader(
+                dataset=self.datasets[split.lower()],
                 dataset_config=self.config["DATA"][split],
                 num_dataloader_workers=self.config.DATA.NUM_DATALOADER_WORKERS,
                 pin_memory=pin_memory,
                 multi_processing_method=self.config.MULTI_PROCESSING_METHOD,
                 device=self.device,
+                sampler_seed=sampler_seed,
+                split=split.lower(),
             )
             for split in self.available_splits
         }
@@ -356,9 +392,9 @@ class SelfSupervisionTask(ClassificationTask):
         if "num_train_samples" in loss_config.keys():
             for split in self.available_splits:
                 if split == "TRAIN":
-                    loss_config["num_train_samples"] = len(self.datasets["TRAIN"])
+                    loss_config["num_train_samples"] = len(self.datasets["train"])
                 if split == "TEST":
-                    loss_config["num_train_samples"] = len(self.datasets["TEST"])
+                    loss_config["num_train_samples"] = len(self.datasets["test"])
         loss_config["name"] = loss_name
         loss = build_loss(loss_config)
         return loss
@@ -388,26 +424,11 @@ class SelfSupervisionTask(ClassificationTask):
         logging.info(f"Initializing model from: {init_weights_path}")
 
         if PathManager.exists(init_weights_path):
-            weights = load_and_broadcast_checkpoint(
-                init_weights_path, device=torch.device("cpu")
+            checkpoint = CheckpointLoader.load_and_broadcast_init_weights(
+                checkpoint_path=init_weights_path, device=torch.device("cpu")
             )
-            skip_layers = params_from_file.get("SKIP_LAYERS", [])
-            replace_prefix = params_from_file.get("REMOVE_PREFIX", None)
-            append_prefix = params_from_file.get("APPEND_PREFIX", None)
-            state_dict_key_name = params_from_file.get("STATE_DICT_KEY_NAME", None)
-
-            # we initialize the weights from this checkpoint. However, we
-            # don't care about the other metadata like iteration number etc.
-            # So the method only reads the state_dict
-            init_model_from_weights(
-                self.config,
-                model,
-                weights,
-                state_dict_key_name=state_dict_key_name,
-                skip_layers=skip_layers,
-                replace_prefix=replace_prefix,
-                append_prefix=append_prefix,
-            )
+            logging.info(f"Checkpoint loaded: {init_weights_path}...")
+            model.init_model_from_weights_params_file(self.config, checkpoint)
         return model
 
     def _build_model(self):
@@ -475,7 +496,24 @@ class SelfSupervisionTask(ClassificationTask):
 
         return model
 
-    def recreate_data_iterator(self, phase_type, epoch, compute_start_iter):
+    def _compute_start_iter_from_checkpoint(self, phase_type) -> int:
+        # used for calculating the start iteration (count from current epoch) when resuming
+        # from checkpoint
+        if self.checkpoint is None or self.checkpoint["iteration"] <= 0:
+            return 0
+
+        num_iters_in_epochs = len(self.dataloaders[phase_type])
+        num_epochs = self.checkpoint["train_phase_idx"] + 1
+        num_train_iters_done = num_epochs * num_iters_in_epochs
+        return self.checkpoint["iteration"] - num_train_iters_done
+
+    def recreate_data_iterator(
+        self,
+        phase_type: str,
+        epoch: int,
+        compute_start_iter: bool,
+        train_phase_idx: int,
+    ):
         """
         Recreate data iterator (including multiprocessing workers) and destroy the
         previous iterators.
@@ -486,30 +524,38 @@ class SelfSupervisionTask(ClassificationTask):
         epoch and start_iteration so that the data is deterministically shuffled,
         so we call them here.
         """
-        if hasattr(self.dataloaders[phase_type], "sampler"):
-            sampler = self.dataloaders[phase_type].sampler
-            # (Re-)Shuffle data: set epoch of distributed (or fairstore) sampler.
-            if hasattr(sampler, "set_epoch"):
-                sampler.set_epoch(epoch)
-            # Resume from the iteration if valid
-            if hasattr(sampler, "set_start_iter"):
-                if (
-                    compute_start_iter
-                    and self.checkpoint is not None
-                    and self.checkpoint["iteration"] > 0
-                ):
-                    num_iters_in_epochs = len(self.dataloaders[phase_type])
-                    num_epochs = self.checkpoint["train_phase_idx"] + 1
-                    num_train_iters_done = num_epochs * num_iters_in_epochs
-                    start_iter = self.checkpoint["iteration"] - num_train_iters_done
-                else:
-                    start_iter = 0
-                sampler.set_start_iter(start_iter)
-            print_sampler_config(sampler)
-        # delete the old data iterator
+        start_iter = 0
+        if compute_start_iter:
+            start_iter = self._compute_start_iter_from_checkpoint(phase_type)
+
+        self.set_epoch(phase_type, epoch, start_iter, train_phase_idx)
+
+        # Gives sampler same seed for entire distributed group as per pytorch documentation.
+        sampler_seed = self.config["SEED_VALUE"]
+        dataset = self.datasets[phase_type]
+
+        # For OSS, this will always return false.
+        # Otherwise, we will rebuild the dataloader after every phase.
+        if dataset.rebuild_dataloader():
+            dataloader = build_dataloader(
+                dataset=dataset,
+                dataset_config=self.config.DATA[phase_type.upper()],
+                num_dataloader_workers=self.config.DATA.NUM_DATALOADER_WORKERS,
+                pin_memory=self.config.DATA.PIN_MEMORY,
+                multi_processing_method=self.config.MULTI_PROCESSING_METHOD,
+                device=self.device,
+                sampler_seed=sampler_seed,
+                split=phase_type,
+            )
+
+            # delete old dataloader and reset it.
+            del self.dataloaders[phase_type]
+            gc.collect()
+            self.dataloaders[phase_type] = dataloader
+
+        # delete old dataiterator and reset it.
         del self.data_iterator
         gc.collect()
-        # recreate the data iterator
         self.data_iterator = iter(self.dataloaders[phase_type])
 
     def _set_classy_state(self, state):
@@ -553,7 +599,6 @@ class SelfSupervisionTask(ClassificationTask):
                     )
             else:
                 self.amp_grad_scaler.load_state_dict(state["amp"])
-
         self.phase_idx = state["phase_idx"]
         self.train_phase_idx = state["train_phase_idx"]
         self.num_updates = state["num_updates"]
@@ -570,7 +615,10 @@ class SelfSupervisionTask(ClassificationTask):
         # start_iter is computed in recreate_data_iterator based on iteration
         # number from the checkpoint state.
         self.recreate_data_iterator(
-            phase_type, epoch=self.phase_idx + 1, compute_start_iter=True
+            phase_type,
+            epoch=self.phase_idx + 1,
+            compute_start_iter=True,
+            train_phase_idx=self.train_phase_idx + 1,
         )
 
         # set the model to train or eval depending on what phase we are in
@@ -606,12 +654,12 @@ class SelfSupervisionTask(ClassificationTask):
                 broadcast_buffers_mode=broadcast_buffers_enum_mode
             )  # NOQA
 
-    def run_hooks(self, hook_function_name):
+    def run_hooks(self, hook_function_name: str):
         """
         Override the ClassyTask run_hook function and run the hooks whenever called
         """
         for hook in self.hooks:
-            getattr(hook, hook_function_name)(self)
+            getattr(hook, hook_function_name, ClassyHook._noop)(self)
 
     def prepare_optimizer(self):
         """
@@ -639,19 +687,14 @@ class SelfSupervisionTask(ClassificationTask):
         - AMP state
         - resume from a checkpoint if available
         """
-        self.dataloaders = self.build_dataloaders(pin_memory=pin_memory)
         self.phases = self._build_phases()
-        train_phases = [phase for phase in self.phases if phase["train"]]
-        num_train_phases = len(train_phases)
+        self.num_phases = len(self.phases)
         self.base_model = self._build_model()
         self._set_ddp_options()
-        self.base_loss = self._build_loss()
         self.meters = self._build_meters()
         self.optimizer = self._build_optimizer()
         self.optimizer_schedulers = self._build_optimizer_schedulers()
-        self.num_train_phases = num_train_phases
 
-        self.base_loss = self.base_loss.to(self.device)
         if self.device.type == "cuda":
             self.base_model = copy_model_to_gpu(self.base_model)
 
@@ -673,23 +716,81 @@ class SelfSupervisionTask(ClassificationTask):
         # Restore an hypothetical checkpoint
         vissl_state_dict = None
         if self.checkpoint_path is not None:
-            self.checkpoint = load_and_broadcast_checkpoint(
-                checkpoint_path=self.checkpoint_path, device=torch.device("cpu")
+            self.checkpoint = CheckpointLoader.load_and_broadcast_checkpoint(
+                checkpoint_folder=self.checkpoint_folder,
+                checkpoint_path=self.checkpoint_path,
+                device=torch.device("cpu"),
             )
+
             self.iteration = self.checkpoint["iteration"]
             self.local_iteration_num = self.checkpoint["iteration_num"]
             vissl_state_dict = self.checkpoint.get("classy_state_dict")
-            if "loss" in self.checkpoint:
-                self.base_loss.load_state_dict(self.checkpoint["loss"])
-                logging.info("======Loaded loss state from checkpoint======")
+
+        current_train_phase_idx = (
+            vissl_state_dict["train_phase_idx"] + 1 if vissl_state_dict else 0
+        )
+
+        self.datasets, self.data_and_label_keys = self.build_datasets(
+            current_train_phase_idx
+        )
+
+        # set dataset state before building dataloader, in order to capture checkpoint info.
+        if vissl_state_dict and "train" in self.datasets:
+            self.datasets["train"].set_classy_state(
+                vissl_state_dict.get("train_dataset_iterator")
+            )
+
+        self.dataloaders = self.build_dataloaders(
+            pin_memory=pin_memory, current_train_phase_idx=current_train_phase_idx
+        )
+
+        # Build base loss, move to device, and load from checkpoint if applicable
+        self.base_loss = self._build_loss()
+        self.base_loss = self.base_loss.to(self.device)
+        if self.checkpoint and "loss" in self.checkpoint:
+            self.base_loss.load_state_dict(self.checkpoint["loss"])
+            logging.info("======Loaded loss state from checkpoint======")
 
         return self._update_classy_state(vissl_state_dict)
+
+    def set_epoch(
+        self, phase_type: str, epoch: int, start_iter: int, train_phase_idx: int
+    ):
+        if hasattr(self.dataloaders[phase_type], "sampler"):
+            sampler = self.dataloaders[phase_type].sampler
+            # (Re-)Shuffle data: set epoch of distributed (or fairstore) sampler
+            # Resume from the iteration if valid
+            self.set_train_epoch_start_iter(sampler, epoch, start_iter, train_phase_idx)
+            print_sampler_config(sampler)
+
+        # call set_epoch and set_start_iter for AirstoreDataset since it handles
+        # shuffle and sample skipping behavior internally
+        dataset = self.datasets[phase_type]
+        if hasattr(dataset, "data_objs"):
+            for data_obj in dataset.data_objs:
+                self.set_train_epoch_start_iter(
+                    data_obj, epoch, start_iter, train_phase_idx
+                )
+
+    def set_train_epoch_start_iter(
+        self, dataset_or_sampler, epoch: int, start_iter: int, train_phase_idx: int
+    ):
+        # (Re-)Shuffle data: set epoch of distributed (or fairstore) sampler
+        if hasattr(dataset_or_sampler, "set_epoch"):
+            dataset_or_sampler.set_epoch(epoch)
+        # Resume from the iteration if valid
+        if hasattr(dataset_or_sampler, "set_start_iter"):
+            dataset_or_sampler.set_start_iter(start_iter)
+
+        if hasattr(dataset_or_sampler, "set_train_phase_idx"):
+            dataset_or_sampler.set_train_phase_idx(train_phase_idx)
 
     def prepare_extraction(self, pin_memory: bool = False):
         """
         Prepares a light-weight task for feature extraction on multi-gpu. The model
         runs in eval mode only.
         """
+        self.datasets, self.data_and_label_keys = self.build_datasets()
         self.dataloaders = self.build_dataloaders(pin_memory=pin_memory)
         self.base_model = self._build_model()
         if self.device.type == "cuda":
@@ -717,3 +818,10 @@ class SelfSupervisionTask(ClassificationTask):
         )
         if self._enable_manual_gradient_reduction:
             logging.info("Enabling manual gradient reduction")
+
+    def num_phase_samples(self, phase_type: str) -> int:
+        """
+        Number of samples in a phase.
+        """
+        dataset = self.datasets[phase_type.lower()]
+        return dataset.num_samples()

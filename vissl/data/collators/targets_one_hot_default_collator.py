@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import torch
 from vissl.data.collators import register_collator
@@ -49,9 +52,10 @@ def targets_one_hot_default_collator(batch, num_classes: int):
         "This collator supports only 1 data source. "
         "Please extend it to support many data sources."
     )
-    assert (
-        len(batch[0]["label"][0]) == 2
-    ), "This collator takes positive and negative labels separately. Please modify it to suit your needs."
+    assert len(batch[0]["label"][0]) == 2, (
+        "This collator takes positive and negative labels separately. "
+        "Please modify it to suit your needs."
+    )
 
     data = torch.stack([x["data"][0] for x in batch])
     data_valid = torch.stack([torch.tensor(x["data_valid"][0]) for x in batch])
@@ -60,7 +64,6 @@ def targets_one_hot_default_collator(batch, num_classes: int):
     labels = [x["label"][0] for x in batch]
     output_labels = []
     for idx in range(data.shape[0]):
-        # import pdb; pdb.set_trace()
         output_labels.append(
             convert_to_one_hot(labels[idx][0], labels[idx][1], num_classes)
         )

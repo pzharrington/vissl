@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 ######################### How to use Hydra configs ###################################
 # VISSL uses hydra for configuration management. The usage looks like:
@@ -71,6 +74,10 @@ config:
   # https://github.com/pytorch/pytorch/blob/master/torch/nn/parallel/distributed.py#L142
   MULTI_PROCESSING_METHOD: "forkserver"
 
+  # Debugging utilities
+  REPRODUCIBILITY:
+    CUDDN_DETERMINISTIC: False
+
   # ----------------------------------------------------------------------------------- #
   # HOOKS
   # ----------------------------------------------------------------------------------- #
@@ -99,6 +106,9 @@ config:
       # at what iteration number should the memory summary be printed. usually
       # set to 1 for very large models
       LOG_ITERATION_NUM: 0
+      # set this to true if you want to print the tensor residing in memory
+      # in event of an exception (such as out of memory exception)
+      DUMP_MEMORY_ON_EXCEPTION: False
 
     # ----------------------------------------------------------------------------------- #
     # nvidia-smi print
@@ -148,6 +158,44 @@ config:
     MONITOR_ACTIVATION_STATISTICS: 0
 
   # ----------------------------------------------------------------------------------- #
+  # PROFILING
+  # ----------------------------------------------------------------------------------- #
+  PROFILING:
+    # How many iterations do we wait before starting the profiler
+    START_ITERATION: 0
+    # How any iterations does the profiler run while not collecting outputs
+    # Data will start to be collected after START_ITERATION + WARMUP_ITERATIONS
+    WARMUP_ITERATIONS: 0
+    # How many iterations do we run the profiler for: after this number
+    # of iteration is reached the profiling is disabled
+    NUM_ITERATIONS: 10
+    # Whether or not to interrupt the training after reaching the last
+    # profiling iteration (after the profiling is done)
+    STOP_TRAINING_AFTER_PROFILING: False
+    # Folder where the traces will be generated
+    OUTPUT_FOLDER: "."
+    # Ranks on which the profiling will be performed
+    # The rank is the index of the GPU in the overall distributed training
+    PROFILED_RANKS: [0, 1]
+    # The available memory profiling options
+    MEMORY_PROFILING:
+      # Track the memory usage through the forward/backward pass, and outputs
+      # the traces complemented by estimations of the memory usage due to
+      # activations and associated activation gradients
+      TRACK_BY_LAYER_MEMORY: False
+    # The available options for the runtime profiler
+    RUNTIME_PROFILING:
+      # To enable the runtime profiler
+      USE_PROFILER: False
+      # Whether or not to profile the CPU activities
+      PROFILE_CPU: True
+      # Whether or not to profile the GPU activities
+      PROFILE_GPU: True
+      # To force the use of the legacy autograd profiler even if
+      # the new pytorch profiler based on kineto is available
+      LEGACY_PROFILER: False
+
+  # ----------------------------------------------------------------------------------- #
   # DATA
   # ----------------------------------------------------------------------------------- #
   DATA:
@@ -176,6 +224,9 @@ config:
 
      # Training Data Options
     TRAIN:
+      # A sampler that cuts the dataset in a deterministic way
+      USE_DEBUGGING_SAMPLER: False
+
       # if we want to resume the data sampler as well from a previous iteration. By default
       # pytorch sampler resumes from every epoch.
       USE_STATEFUL_DISTRIBUTED_SAMPLER: False
@@ -186,6 +237,9 @@ config:
       REMOVE_IMG_PATH_PREFIX: ""
       # what prefix to replace the old prefix with. Could stay empty too
       NEW_IMG_PATH_PREFIX: ""
+      # Base dataset to use to wrap the datasets defined. The default and only current oss supported
+      # default is the generic_ssl_dataset.
+      BASE_DATASET: "generic_ssl"
       # name of the dataset. Meaningful and used to do lookup in the dataset_catalog.json
       # it has the advantage that user needs to full the dataset_catalog.json once
       # and then simply use the dataset name without having to specify data paths every time.
@@ -204,6 +258,13 @@ config:
       # standard label type is used for supervised learning and user specifis the labels to use.
       # zero sets all labels to 0, which is necessary when using necessary
       # when cutmixup_collator is being used for self-supervised training.
+      # Note that if LABEL_SOURCES (see above) is provided, it will override
+      # LABEL_TYPE. For example, if SSL training on a labeled dataset (e.g
+      # ImageNet imagefolders) and
+      # LABEL_SOURCES: [DISK_FOLDER]
+      # LABEL_TYPE: "zero"
+      # the label type will not be zero, but the label associated with the
+      # image folder.
       LABEL_TYPE: "standard"
       # whether to memory map the input data.
       MMAP_MODE: True
@@ -270,7 +331,9 @@ config:
       #  "mode": "batch", # how to apply mixup/cutmix params (per 'batch', 'pair' (pair of elements), 'elem' (element)
       #  "correct_lam": True, # apply lambda correction when cutmix bbox clipped by image borders
       #  "label_smoothing": 0.1, # apply label smoothing to the mixed target tensor
-      #  "num_classes": 1000 # number of classes for target
+      #  "num_classes": 2 # number of classes for target. Labels aren't
+      #  actually used for SSL, so set to a small number to avoid shuffling
+      #  large vectors around unnecessarily.
       # }
       # Also note that using the CutMixUp collator in a supervised context
       # requires using the cross_entropy_multiple_output_single_target to
@@ -316,6 +379,8 @@ config:
       # QueueDataset, you can instead return a valid and previously seen image.
       ENABLE_QUEUE_DATASET: False
     TEST:
+      # A sampler that cuts the dataset in a deterministic way
+      USE_DEBUGGING_SAMPLER: False
       # if we want to resume the data sampler as well from a previous iteration
       USE_STATEFUL_DISTRIBUTED_SAMPLER: False
       # if users want to replace certain prefixes from the image paths and replace them with
@@ -340,6 +405,9 @@ config:
         IS_BALANCED: False
         SKIP_NUM_SAMPLES: 0
       SUBSET: ""
+      # Base dataset to use to wrap the datasets defined. The default and only current oss supported
+      # default is the generic_ssl_dataset.
+      BASE_DATASET: "generic_ssl"
       DATASET_NAMES: ["imagenet1k_folder"]
       COPY_TO_LOCAL_DISK: False
       COPY_DESTINATION_DIR: ""
@@ -452,15 +520,31 @@ config:
     # ZeRO2 sharded DDP from Fairscale https://github.com/facebookresearch/fairscale
     # ----------------------------------------------------------------------------------- #
     SHARDED_DDP_SETUP:
+      # set this to true if you want to use SDP instead of DDP.
+      # VISSL will automatically set optimizer = zero and
+      # configure the settings required to run SDP successfully.
+      USE_SDP: False
       reduce_buffer_size: -1
     # ----------------------------------------------------------------------------------- #
     # FSDP from Fairscale https://github.com/facebookresearch/fairscale
     #   These options should match FSDP classes init options.
     # ----------------------------------------------------------------------------------- #
     FSDP_CONFIG:
+      # set this option to True to enable FSDP and automatically determine the config
+      # for FSDP based on AMP true/false.
+      AUTO_SETUP_FSDP: False
+      # Set this option to a positive number to automatically wrap "big" layers with
+      # a dedicated FSDP wrapping: the number provided here is the number of
+      # parameters that serves as threshold to decide if a layer is "big"
+      AUTO_WRAP_THRESHOLD: 0
+      # Parameters of fairscale FSDP
       flatten_parameters: True
       mixed_precision: True
       fp32_reduce_scatter: False  # Only makes sense to be True when mixed_precision is True.
+      compute_dtype: float32  # Choose "float32" or "float16"
+      bucket_cap_mb: 0
+      clear_autocast_cache: True
+      verbose: True
     # ----------------------------------------------------------------------------------- #
     # Feature evaluation settings
     # ----------------------------------------------------------------------------------- #
@@ -506,88 +590,118 @@ config:
     # ----------------------------------------------------------------------------------- #
     TRUNK:
       NAME: "resnet"
-      # for any extra params that the model requires, pass them in the trunk_params
-      TRUNK_PARAMS:
-        # ------------------------------------------------------------- #
-        # ResNe(X)t params
-        # ------------------------------------------------------------- #
-        RESNETS:
-          DEPTH: 50
-          WIDTH_MULTIPLIER: 1
-          NORM: BatchNorm    # BatchNorm | LayerNorm | GroupNorm
-          # If using GroupNorm, this sets number of groups. Recommend 32 as a
-          # naive suggestion. GroupNorm only available for ResNe(X)t.
-          GROUPNORM_GROUPS: 32
-          # Use weight-standardized convolutions
-          STANDARDIZE_CONVOLUTIONS: False
-          GROUPS: 1
-          ZERO_INIT_RESIDUAL: False
-          WIDTH_PER_GROUP: 64
-          # Colorization model uses stride=1 for last layer to retain higher spatial resolution
-          # for the pixel-wise task. Torchvision default is stride=2 and all other models
-          # use this so we set the default as 2.
-          LAYER4_STRIDE: 2
+      # ------------------------------------------------------------- #
+      # ResNe(X)t params
+      # ------------------------------------------------------------- #
+      RESNETS:
+        DEPTH: 50
+        WIDTH_MULTIPLIER: 1
+        NORM: BatchNorm    # BatchNorm | LayerNorm | GroupNorm
+        # If using GroupNorm, this sets number of groups. Recommend 32 as a
+        # naive suggestion. GroupNorm only available for ResNe(X)t.
+        GROUPNORM_GROUPS: 32
+        # Use weight-standardized convolutions
+        STANDARDIZE_CONVOLUTIONS: False
+        GROUPS: 1
+        ZERO_INIT_RESIDUAL: False
+        WIDTH_PER_GROUP: 64
+        # Colorization model uses stride=1 for last layer to retain higher spatial resolution
+        # for the pixel-wise task. Torchvision default is stride=2 and all other models
+        # use this so we set the default as 2.
+        LAYER4_STRIDE: 2
 
-        # ------------------------------------------------------------- #
-        # ResNe(X)t params, modified for decals data
-        # ------------------------------------------------------------- #
-        RESNETS_DECALS:
-          DEPTH: 50
-          WIDTH_MULTIPLIER: 1
-          NORM: BatchNorm    # BatchNorm | LayerNorm
-          GROUPS: 1
-          # If using GroupNorm, this sets number of groups. Recommend 32 as a
-          # naive suggestion. GroupNorm only available for ResNe(X)t.
-          GROUPNORM_GROUPS: 32
-          # Use weight-standardized convolutions
-          STANDARDIZE_CONVOLUTIONS: False
-          ZERO_INIT_RESIDUAL: False
-          WIDTH_PER_GROUP: 64
-          # Colorization model uses stride=1 for last layer to retain higher spatial resolution
-          # for the pixel-wise task. Torchvision default is stride=2 and all other models
-          # use this so we set the default as 2.
-          LAYER4_STRIDE: 2
-          # Set the conv1 layer to use stride 1 for lower-dimensional images than ImageNet
-          CONV1_STRIDE1: True
+      # ------------------------------------------------------------- #
+      # ResNe(X)t params, modified for decals data
+      # ------------------------------------------------------------- #
+      RESNETS_DECALS:
+        DEPTH: 50
+        WIDTH_MULTIPLIER: 1
+        NORM: BatchNorm    # BatchNorm | LayerNorm
+        GROUPS: 1
+        # If using GroupNorm, this sets number of groups. Recommend 32 as a
+        # naive suggestion. GroupNorm only available for ResNe(X)t.
+        GROUPNORM_GROUPS: 32
+        # Use weight-standardized convolutions
+        STANDARDIZE_CONVOLUTIONS: False
+        ZERO_INIT_RESIDUAL: False
+        WIDTH_PER_GROUP: 64
+        # Colorization model uses stride=1 for last layer to retain higher spatial resolution
+        # for the pixel-wise task. Torchvision default is stride=2 and all other models
+        # use this so we set the default as 2.
+        LAYER4_STRIDE: 2
+        # Set the conv1 layer to use stride 1 for lower-dimensional images than ImageNet
+        CONV1_STRIDE1: True
 
-        # ------------------------------------------------------------- #
-        # EfficientNet params
-        # ------------------------------------------------------------- #
-        # follow classy vision for efficientNet settings
-        EFFICIENT_NETS: {}
+      # ------------------------------------------------------------- #
+      # EfficientNet params
+      # ------------------------------------------------------------- #
+      # follow classy vision for efficientNet settings
+      EFFICIENT_NETS: {}
 
-        # ------------------------------------------------------------- #
-        # RegNet params
-        # ------------------------------------------------------------- #
-        REGNET: {}
+      # ------------------------------------------------------------- #
+      # RegNet params
+      # ------------------------------------------------------------- #
+      REGNET: {}
 
-        # ------------------------------------------------------------- #
-        # Vision Transformer/DeiT params. Using a name will
-        # override/ignore all other VISION_TRANSFORMERS parameters. Named
-        # options include vit_b_32, vit_b_16, vit_l_32, vit_l_16, vit_h_14.
-        # Using
-        # ------------------------------------------------------------- #
-        VISION_TRANSFORMERS:
-          name:
-          IMAGE_SIZE: 224
-          PATCH_SIZE: 16
-          NUM_LAYERS: 12
-          NUM_HEADS: 12
-          HIDDEN_DIM: 768
-          MLP_DIM: 3072
-          # MLP and projection layer dropout rate
-          DROPOUT_RATE: 0
-          # Attention dropout rate
-          ATTENTION_DROPOUT_RATE: 0
-          # Use the token for classification. Currently no alternatives
-          # supported
-          CLASSIFIER: token
-          # Stochastic depth dropout rate. Turning on stochastic depth and
-          # using aggressive augmentation is essentially the difference
-          # between a DeiT and a ViT.
-          DROP_PATH_RATE: 0
-          QKV_BIAS: False # Bias for QKV in attention layers.
-          QK_SCALE: False # Scale
+      # ------------------------------------------------------------- #
+      # Vision Transformer/DeiT params. Using a name will
+      # override/ignore all other VISION_TRANSFORMERS parameters. Named
+      # options include vit_b_32, vit_b_16, vit_l_32, vit_l_16, vit_h_14.
+      # Using
+      # ------------------------------------------------------------- #
+      VISION_TRANSFORMERS:
+        name:
+        IMAGE_SIZE: 224
+        PATCH_SIZE: 16
+        NUM_LAYERS: 12
+        NUM_HEADS: 12
+        HIDDEN_DIM: 768
+        MLP_DIM: 3072
+        # MLP and projection layer dropout rate
+        DROPOUT_RATE: 0
+        # Attention dropout rate
+        ATTENTION_DROPOUT_RATE: 0
+        # Use the token for classification. Currently no alternatives
+        # supported
+        CLASSIFIER: token
+        # Stochastic depth dropout rate. Turning on stochastic depth and
+        # using aggressive augmentation is essentially the difference
+        # between a DeiT and a ViT.
+        DROP_PATH_RATE: 0
+        QKV_BIAS: False # Bias for QKV in attention layers.
+        QK_SCALE: False # Scale
+
+      # ------------------------------------------------------------- #
+      # Parameters unique to the ConViT and not used for standard vision
+      # transformers
+      # -------------------------------------------------------------
+      CONVIT:
+        # Notes on ConViT (D'Ascoli et al., TODO insert arxiv link):
+        # Ideally, the number of heads should be a square.
+        # The paper used: 4, 9, or 16 heads;
+        # HIDDEN_DIM = 64 * # NUM_HEADS, so 256, 576, or 1024, respectively;
+        # MLP_DIM = 4 * HIDDEN_DIM, so 1024, 2304, or 4096, respectively.
+        #
+        # ConViT Params:
+        # Number of gated positional self-attention
+        # layers. These are self-attention layers that have separate
+        # positional and content-based attention components, allowing them
+        # to function as convolutional layers if initialized to be local
+        # (see USE_LOCAL_INIT below). They're what make ConViTs ConViTs!
+        # n_gpsa_layers out of NUM_LAYERS will be gated positional self
+        # attention layers.
+        N_GPSA_LAYERS: 10
+        # Whether to add class token to gpsa layers
+        CLASS_TOKEN_IN_LOCAL_LAYERS: False
+        # Determines how much the positional attention is focused on the
+        # patch of maximal attention. "Alpha" in the paper. Equivalent to
+        # the temperature of positional attention softmax.
+        LOCALITY_STRENGTH: 1.
+        # Dimensionality of the relative positional embeddings
+        LOCALITY_DIM: 10
+        # Whether to initialize the positional component of the GPSAs
+        # locally. This is necessary for them to be convolutional.
+        USE_LOCAL_INIT: True
 
     # ----------------------------------------------------------------------------------- #
     # MODEL HEAD
@@ -836,6 +950,20 @@ config:
         start_iter: 0
         local_queue_length: 0 # automatically inferred to queue_length // world_size
 
+    # ----------------------------------------------------------------------------------- #
+    # DINO LOSS (Specific to DINO https://arxiv.org/abs/2104.14294)
+    # ----------------------------------------------------------------------------------- #
+    dino_loss:
+      momentum: 0.996
+      student_temp: 0.1
+      teacher_temp_min: 0.04
+      teacher_temp_max: 0.07
+      teacher_temp_warmup_iters: 37500 # 30 epochs
+      crops_for_teacher: [0, 1]
+      ema_center: 0.9
+      normalize_last_layer: true
+      output_dim: 65536  # automatically inferred from model HEAD settings
+
     # -----------------------------------------------------------------------------------#
     # DeepCluster V2 LOSS (baselines in SwAV https://arxiv.org/abs/2006.09882)
     # -----------------------------------------------------------------------------------#
@@ -860,6 +988,14 @@ config:
       queue_size: 65536
       momentum: 0.999
       temperature: 0.2
+
+    # ----------------------------------------------------------------------------------- #
+    #  Barlow Twins Loss (https://arxiv.org/abs/2103.03230v1)
+    # ----------------------------------------------------------------------------------- #
+    barlow_twins_loss:
+      lambda_: 0.0051
+      scale_loss: 0.024
+      embedding_dim: 8192
 
   # ----------------------------------------------------------------------------------- #
   # OPTIMIZER
@@ -916,6 +1052,8 @@ config:
           # is used to determine how to scale the base learning rate value.
           # scaled_lr = ((batchsize_per_gpu * world_size) * base_value ) / base_lr_batch_size
           base_lr_batch_size: 256
+          # scaling_type can be set to "sqrt" to reduce the impact of scaling on the base value
+          scaling_type: "linear"
         name: "multistep"
         update_interval: "epoch"
         # values indicate the step LR learning rate values. Instead of taking gamma, we
@@ -942,6 +1080,7 @@ config:
           auto_scale: False
           base_value: 0.1
           base_lr_batch_size: 256
+          scaling_type: "linear"
         name: "multistep"
         update_interval: "epoch"
         values: [0.1, 0.01, 0.001]
@@ -962,6 +1101,20 @@ config:
     # is wrapped by FSDP with flattening, individual parameters inside the model are
     # replaced with a flattened parameter. Therefore, this option is needed in that case.
     construct_single_param_group_only: False
+
+  # ----------------------------------------------------------------------------------- #
+  # Options specific to the "extract_feature" engine
+  # ----------------------------------------------------------------------------------- #
+  EXTRACT_FEATURES:
+    # Path where to save the features: if empty, the checkpoint folder
+    # will be used as location where to save the features
+    OUTPUT_DIR: ""
+    # How many features to accumulate before written them on disk:
+    # - if set to 0, the extract_engine engine will dump features
+    #   as soon as they are computed (accumulate none in memory)
+    # - if set to -1, the extract_engine engine will dump features
+    #   at the very end (accumulate all in memory)
+    CHUNK_THRESHOLD: 0
 
   # ----------------------------------------------------------------------------------- #
   # CLUSTERFIT APPROACH (https://arxiv.org/abs/1912.03330)
@@ -1084,12 +1237,13 @@ config:
     NAME: "vissl"
     # Comment of the job on SLURM
     COMMENT: "vissl job"
-    # Partition of SLURM on which to run the job
-    PARTITION: "learnfair"
+    # Partition of SLURM on which to run the job. This is a required field if using SLURM.
+    PARTITION: ""
     # Where the logs produced by the SLURM jobs will be output
     LOG_FOLDER: "."
-    # Maximum number of hours needed by the job to complete. Above this limit, the job might be pre-empted.
+    # Maximum number of hours / minutes needed by the job to complete. Above this limit, the job might be pre-empted.
     TIME_HOURS: 72
+    TIME_MINUTES: 0
     # Additional constraints on the hardware of the nodes to allocate (example 'volta' to select a volta GPU)
     CONSTRAINT: ""
     # GB of RAM memory to allocate for each node

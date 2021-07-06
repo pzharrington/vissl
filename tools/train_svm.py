@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import multiprocessing as mp
@@ -14,11 +17,7 @@ from vissl.models.model_helpers import get_trunk_output_feature_names
 from vissl.utils.checkpoint import get_checkpoint_folder
 from vissl.utils.distributed_launcher import launch_distributed
 from vissl.utils.env import set_env_vars
-from vissl.utils.hydra_config import (
-    convert_to_attrdict,
-    is_hydra_available,
-    print_cfg,
-)
+from vissl.utils.hydra_config import convert_to_attrdict, is_hydra_available, print_cfg
 from vissl.utils.io import load_file
 from vissl.utils.logger import setup_logging, shutdown_logging
 from vissl.utils.misc import merge_features
@@ -32,12 +31,12 @@ def train_svm(cfg: AttrDict, output_dir: str, layername: str):
     # train the svm
     logging.info(f"Training SVM for layer: {layername}")
     trainer = SVMTrainer(cfg["SVM"], layer=layername, output_dir=output_dir)
-    train_data = merge_features(output_dir, "train", layername, cfg)
+    train_data = merge_features(output_dir, "train", layername)
     train_features, train_targets = train_data["features"], train_data["targets"]
     trainer.train(train_features, train_targets)
 
     # test the svm
-    test_data = merge_features(output_dir, "test", layername, cfg)
+    test_data = merge_features(output_dir, "test", layername)
     test_features, test_targets = test_data["features"], test_data["targets"]
     trainer.test(test_features, test_targets)
     logging.info("All Done!")

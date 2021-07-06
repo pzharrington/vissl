@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 """
 Wrapper to call torch.distributed.launch to run multi-gpu trainings.
@@ -7,14 +10,14 @@ Supports SLURM as an option. Set config.SLURM.USE_SLURM=true to use slurm.
 """
 
 import sys
-from typing import List, Any
+from typing import Any, List
 
-from hydra.experimental import initialize_config_module, compose
+from hydra.experimental import compose, initialize_config_module
 from vissl.utils.distributed_launcher import (
     launch_distributed,
     launch_distributed_on_slurm,
 )
-from vissl.utils.hydra_config import is_hydra_available, convert_to_attrdict
+from vissl.utils.hydra_config import convert_to_attrdict, is_hydra_available
 from vissl.utils.slurm import is_submitit_available
 
 

@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 
@@ -98,9 +101,14 @@ class DiskImageDataset(QueueDataset):
         Get paths of all images in the datasets. See load_data()
         """
         self._load_data(self._path)
-        return self.image_dataset
+        if self.data_source == "disk_folder":
+            assert isinstance(self.image_dataset, ImageFolder)
+            return [sample[0] for sample in self.image_dataset.samples]
+        else:
+            return self.image_dataset
 
-    def _replace_img_path_prefix(self, img_path, replace_prefix, new_prefix):
+    @staticmethod
+    def _replace_img_path_prefix(img_path: str, replace_prefix: str, new_prefix: str):
         if img_path.startswith(replace_prefix):
             return img_path.replace(replace_prefix, new_prefix)
         return img_path

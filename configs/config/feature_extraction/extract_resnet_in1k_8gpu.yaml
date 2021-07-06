@@ -7,6 +7,7 @@ config:
       DATA_SOURCES: [disk_folder]
       LABEL_SOURCES: [disk_folder]
       DATASET_NAMES: [imagenet1k_folder]
+      LABEL_TYPE: sample_index
       BATCHSIZE_PER_REPLICA: 32
       TRANSFORMS:
         - name: Resize
@@ -42,9 +43,8 @@ config:
   MODEL:
     TRUNK:
       NAME: resnet
-      TRUNK_PARAMS:
-        RESNETS:
-          DEPTH: 50
+      RESNETS:
+        DEPTH: 50
     WEIGHTS_INIT:
       PARAMS_FILE: "specify the model weights"
       STATE_DICT_KEY_NAME: classy_state_dict

@@ -38,6 +38,7 @@ var/
 .hydra/
 tb_logs/
 metrics.json
+stdout.json
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -99,3 +100,7 @@ website/pages/tutorials/*
 decals/sout/*
 decals/*.sh
 decals/*.slr
+
+# Configs for local development
+configs/config/config_local/*
+train_config.yaml

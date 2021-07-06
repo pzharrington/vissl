@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from enum import Enum, auto
 from typing import List
@@ -6,8 +9,10 @@ from typing import List
 from classy_vision.hooks.classy_hook import ClassyHook
 from vissl.config import AttrDict
 from vissl.hooks.deepclusterv2_hooks import ClusterMemoryHook, InitMemoryHook  # noqa
+from vissl.hooks.dino_hooks import DINOHook
 from vissl.hooks.grad_clip_hooks import GradClipHook  # noqa
 from vissl.hooks.log_hooks import (  # noqa
+    DumpMemoryOnException,
     LogGpuMemoryHook,
     LogGpuStatsHook,
     LogLossLrEtaHook,
@@ -15,6 +20,7 @@ from vissl.hooks.log_hooks import (  # noqa
     LogPerfTimeMetricsHook,
 )
 from vissl.hooks.moco_hooks import MoCoHook  # noqa
+from vissl.hooks.profiling_hook import ProfilingHook
 from vissl.hooks.state_update_hooks import (  # noqa
     CheckNanLossHook,
     FreezeParametersHook,
@@ -32,6 +38,7 @@ from vissl.hooks.swav_momentum_hooks import (
     SwAVMomentumNormalizePrototypesHook,
 )
 from vissl.hooks.tensorboard_hook import SSLTensorboardHook  # noqa
+from vissl.utils.checkpoint import get_checkpoint_folder
 from vissl.utils.tensorboard import get_tensorboard_hook, is_tensorboard_available
 
 
@@ -49,6 +56,7 @@ class SSLClassyHookFunctions(Enum):
     on_step = auto()
     on_phase_end = auto()
     on_end = auto()
+    on_exception = auto()
 
 
 def default_hook_generator(cfg: AttrDict) -> List[ClassyHook]:
@@ -89,6 +97,8 @@ def default_hook_generator(cfg: AttrDict) -> List[ClassyHook]:
                 SwAVMomentumNormalizePrototypesHook(),
             ]
         )
+    if cfg.LOSS.name == "dino_loss":
+        hooks.append(DINOHook())
     if cfg.LOSS.name == "deepclusterv2_loss":
         hooks.extend([InitMemoryHook(), ClusterMemoryHook()])
     if cfg.LOSS.name == "moco_loss":
@@ -106,6 +116,8 @@ def default_hook_generator(cfg: AttrDict) -> List[ClassyHook]:
         hooks.extend([LogGpuStatsHook()])
     if cfg.HOOKS.MEMORY_SUMMARY.PRINT_MEMORY_SUMMARY:
         hooks.extend([LogGpuMemoryHook(cfg.HOOKS.MEMORY_SUMMARY.LOG_ITERATION_NUM)])
+    if cfg.HOOKS.MEMORY_SUMMARY.DUMP_MEMORY_ON_EXCEPTION:
+        hooks.append(DumpMemoryOnException())
     if cfg.HOOKS.TENSORBOARD_SETUP.USE_TENSORBOARD:
         assert is_tensorboard_available(), (
             "Tensorboard must be installed to use it. Please install tensorboard using:"
@@ -131,6 +143,12 @@ def default_hook_generator(cfg: AttrDict) -> List[ClassyHook]:
         if cfg.HOOKS.PERF_STATS.ROLLING_BTIME_FREQ > 0
         else None
     )
+
+    if ProfilingHook.is_enabled(cfg.PROFILING):
+        hooks.append(ProfilingHook(profiling_config=cfg.PROFILING))
+
+    world_size = cfg.DISTRIBUTED.NUM_NODES * cfg.DISTRIBUTED.NUM_PROC_PER_NODE
+    checkpoint_folder = get_checkpoint_folder(cfg)
     hooks.extend(
         [
             CheckNanLossHook(),
@@ -140,8 +158,8 @@ def default_hook_generator(cfg: AttrDict) -> List[ClassyHook]:
             UpdateTrainBatchTimeHook(),
             UpdateTestBatchTimeHook(),
             UpdateTrainIterationNumHook(),
-            LogLossMetricsCheckpointHook(),
-            LogLossLrEtaHook(rolling_btime_freq),
+            LogLossMetricsCheckpointHook(world_size),
+            LogLossLrEtaHook(checkpoint_folder, rolling_btime_freq),
         ]
     )
     return hooks

@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import time
@@ -11,6 +14,7 @@ from classy_vision.generic.profiler import (
     count_params,
 )
 from classy_vision.hooks.classy_hook import ClassyHook
+from vissl.data import AirstoreDataset, GenericSSLDataset
 
 
 class SSLModelComplexityHook(ClassyHook):
@@ -95,6 +99,17 @@ class SetDataSamplerEpochHook(ClassyHook):
             if hasattr(task.dataloaders[phase_type].sampler, "set_epoch"):
                 # task.phase_idx is current running phase id
                 task.dataloaders[phase_type].sampler.set_epoch(task.phase_idx)
+
+        # call set_epoch and for AirstoreDataset since it handles shuffle
+        # behavior internally
+        if hasattr(task.dataloaders[phase_type], "dataset"):
+            dataset = task.dataloaders[phase_type].dataset
+            if isinstance(dataset, GenericSSLDataset):
+                for data_obj in dataset.data_objs:
+                    if isinstance(data_obj, AirstoreDataset):
+                        # task.phase_idx is current running phase id
+                        data_obj.set_epoch(task.phase_idx)
+
         logging.info(f"Starting phase {task.phase_idx} [{phase_type}]")
 
 
@@ -272,16 +287,21 @@ class FreezeParametersHook(ClassyHook):
                 )
             return
 
-        matched_named_params = 0
+        world_size = (
+            task.config.DISTRIBUTED.NUM_NODES
+            * task.config.DISTRIBUTED.NUM_PROC_PER_NODE
+        )
+        match_param_prefix = "module." if world_size == 1 else ""
+        num_matched_named_params = 0
         for name, p in task.model.named_parameters():
+            match_param_name = f"{match_param_prefix}{name}"
             if (
-                name in map_params_to_iters
-                and task.iteration < map_params_to_iters[name]
-            ):
-                matched_named_params += 1
+                match_param_name in map_params_to_iters
+            ) and task.iteration < map_params_to_iters[match_param_name]:
+                num_matched_named_params += 1
                 p.grad = None
         # TODO (Min): we need to check the exact target number.
-        assert matched_named_params > 0, (
+        assert num_matched_named_params > 0, (
             f"Didn't find expected number of layers: "
-            f"{matched_named_params} vs.  {len(map_params_to_iters)}"
+            f"{num_matched_named_params} vs.  {len(map_params_to_iters)}"
         )

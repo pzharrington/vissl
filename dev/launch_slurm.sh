@@ -1,5 +1,8 @@
 #!/bin/bash
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 ######################### EXAMPLE USAGE #################################
 #
@@ -25,7 +28,7 @@ CFG=( "$@" )
 # create a temporary experiment folder to run the SLURM job in isolation
 RUN_ID=$(date +'%Y-%m-%d-%H-%M-%S')
 EXP_ROOT_DIR="/checkpoint/$USER/vissl/$RUN_ID"
-CHECKPOINT_DIR="$EXP_ROOT_DIR/checkpoints/"
+CHECKPOINT_DIR=${CHECKPOINT_DIR:-"$EXP_ROOT_DIR/checkpoints/"}
 
 echo "EXP_ROOT_DIR: $EXP_ROOT_DIR"
 echo "CHECKPOINT_DIR: $CHECKPOINT_DIR"
