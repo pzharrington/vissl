@@ -1,11 +1,46 @@
 #!/bin/bash -e
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 SRC_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 SRC_DIR=$(dirname "${SRC_DIR}")
-BINARY="python ${SRC_DIR}/tools/run_distributed_engines.py"
+
+
+# -----------------------------------------------------------------------------
+# Unit tests: running important unit tests in CI
+# -----------------------------------------------------------------------------
+
+TEST_LIST=(
+    "test_regnet_fsdp.py"
+    "test_regnet_fsdp_integration.py"
+    "test_state_checkpointing.py"
+    "test_layer_memory_tracking.py"
+    "test_extract_features.py"
+    "test_extract_cluster.py"
+)
+
+echo "========================================================================"
+echo "Unit tests to run:"
+echo "${TEST_LIST[@]}"
+echo "========================================================================"
+
+pushd "${SRC_DIR}/tests"
+for test_file in "${TEST_LIST[@]}"; do
+  python -m unittest $test_file || exit
+done
+popd
+
+
+# -----------------------------------------------------------------------------
+# Integration tests: running configurations
+# - verify that the configuration are valid
+# - verify that the associated jobs run to the end
+# -----------------------------------------------------------------------------
 
 CFG_LIST=(
+    "test/integration_test/quick_barlow_twins"
     "test/integration_test/quick_deepcluster_v2"
     "test/integration_test/quick_pirl"
     "test/integration_test/quick_simclr"
@@ -19,6 +54,8 @@ echo "========================================================================"
 echo "Configs to run:"
 echo "${CFG_LIST[@]}"
 echo "========================================================================"
+
+BINARY="python ${SRC_DIR}/tools/run_distributed_engines.py"
 
 for cfg in "${CFG_LIST[@]}"; do
     echo "========================================================================"

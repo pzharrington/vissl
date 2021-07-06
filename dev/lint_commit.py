@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import argparse
 import os
@@ -36,6 +39,13 @@ def get_argument_parser():
         const=True,
         default=False,
         help="Running the linter on the whole repository",
+    )
+    parser.add_argument(
+        "-p",
+        "--path",
+        type=str,
+        default="",
+        help="Running the linter on a specific directory",
     )
     return parser
 
@@ -101,9 +111,9 @@ def run_sort_include_on(paths: Sequence[str], check_only: bool):
     options = "-c" if check_only else ""
     for path in paths:
         if os.path.isdir(path):
-            _run_command(f"isort {options} -sp {path}")
+            _run_command(f"isort -sp . {options} -rc {path}")
         elif path.endswith(".py"):
-            _run_command(f"isort {options} {path}")
+            _run_command(f"isort -sp . {options} {path}")
 
 
 def run_flake8_on(paths: Sequence[str]):
@@ -146,11 +156,19 @@ if __name__ == "__main__":
     ```
     python dev/lint_commit.py --all --repo
     ```
+
+    To apply the checks on a subfolder:
+
+    ```
+    python dev/lint_commit.py --all --path /path/to/format
+    ```
     """
     args = get_argument_parser().parse_args()
 
     # Find the files and folders to impact with the checks
-    if not args.repo:
+    if args.path:
+        target_paths = [args.path]
+    elif not args.repo:
         target_paths = get_list_of_impacted_files(os.getcwd())
     else:
         target_paths = [

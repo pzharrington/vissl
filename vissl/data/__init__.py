@@ -1,12 +1,21 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
+import random
 
+import numpy as np
 import torch
 from classy_vision.dataset import DataloaderAsyncGPUWrapper
 from torch.utils.data import DataLoader
+from vissl.data.airstore_dataset import AirstoreDataset
 from vissl.data.collators import get_collator
-from vissl.data.data_helper import StatefulDistributedSampler
+from vissl.data.data_helper import (
+    DeterministicDistributedSampler,
+    StatefulDistributedSampler,
+)
 from vissl.data.dataloader_sync_gpu_wrapper import DataloaderSyncGPUWrapper
 from vissl.data.dataset_catalog import (
     VisslDatasetCatalog,
@@ -17,7 +26,7 @@ from vissl.data.disk_dataset import DiskImageDataset
 from vissl.data.ssl_dataset import GenericSSLDataset
 from vissl.data.synthetic_dataset import SyntheticImageDataset
 from vissl.data.torchvision_dataset import TorchvisionDataset
-from vissl.utils.misc import setup_multiprocessing_method
+from vissl.utils.misc import set_dataloader_seeds, setup_multiprocessing_method
 
 # NEW:
 # import numpy to properly set random seed
@@ -27,6 +36,7 @@ from vissl.data.decals_h5_source import DecalsHDF5Dataset
 
 
 __all__ = [
+    "AirstoreDataset",
     "GenericSSLDataset",
     "get_data_files",
     "register_datasets",
@@ -34,6 +44,7 @@ __all__ = [
 ]
 
 DATASET_SOURCE_MAP = {
+    "airstore": AirstoreDataset,
     "disk_filelist": DiskImageDataset,
     "disk_folder": DiskImageDataset,
     "torchvision_dataset": TorchvisionDataset,
@@ -56,7 +67,7 @@ DATA_SOURCES_WITH_SUBSET_SUPPORT = {
 }
 
 
-def build_dataset(cfg, split):
+def build_dataset(cfg, split, **kwargs):
     """
     Given the user defined config and the dataset split (train/val), build
     the dataset.
@@ -103,7 +114,7 @@ def print_sampler_config(data_sampler):
     logging.info("Distributed Sampler config:\n{}".format(sampler_cfg))
 
 
-def get_sampler(dataset, dataset_config):
+def get_sampler(dataset, dataset_config, sampler_seed=0):
     """
     Given the dataset object and the dataset config, get the data sampler to use
     Supports 2 types of samplers:
@@ -113,9 +124,15 @@ def get_sampler(dataset, dataset_config):
     """
     data_sampler = None
     if torch.distributed.is_available() and torch.distributed.is_initialized():
-        if dataset_config["USE_STATEFUL_DISTRIBUTED_SAMPLER"]:
-            data_sampler = StatefulDistributedSampler(
+        if dataset_config["USE_DEBUGGING_SAMPLER"]:
+            data_sampler = DeterministicDistributedSampler(
                 dataset, batch_size=dataset_config["BATCHSIZE_PER_REPLICA"]
+            )
+        elif dataset_config["USE_STATEFUL_DISTRIBUTED_SAMPLER"]:
+            data_sampler = StatefulDistributedSampler(
+                dataset,
+                batch_size=dataset_config["BATCHSIZE_PER_REPLICA"],
+                seed=sampler_seed,
             )
         else:
             data_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
@@ -128,15 +145,23 @@ def get_sampler(dataset, dataset_config):
     return data_sampler
 
 
-def get_loader(
+def debugging_worker_init_fn(worker_id: int):
+    random.seed(worker_id)
+    np.random.seed(worker_id)
+    torch.manual_seed(worker_id)
+
+
+def build_dataloader(
     dataset: GenericSSLDataset,
     dataset_config: dict,
     num_dataloader_workers: int,
     pin_memory: bool,
     multi_processing_method: str,
     device: torch.device,
+    sampler_seed=0,
     get_sampler=get_sampler,
-    worker_init_fn=None,
+    worker_init_fn=set_dataloader_seeds,
+    **kwargs,
 ):
     """
     Get the dataloader for the given satasets and data split
@@ -148,6 +173,7 @@ def get_loader(
         num_dataloader_workers (int):   number of workers per gpu (or cpu) training
         pin_memory (bool):              whether to pin memory or not
         multi_processing_method (str):  method to use. options: forkserver | fork | spawn
+        sampler_seed (int):             seed for the sampler. Should be identical per process
         device (torch.device):          training on cuda or cpu
         get_sampler (get_sampler):      function that is used to get the sampler
         worker_init_fn (None):          any function that should be executed during
@@ -158,14 +184,22 @@ def get_loader(
         DataloaderAsyncGPUWrapper or DataloaderSyncGPUWrapper depending
         on whether user wants to copy data to gpu async or not.
     """
+
     # pytorch dataloader requires setting the multiprocessing type.
     setup_multiprocessing_method(multi_processing_method)
+
     # we don't need to set the rank, replicas as the Sampler already does so in
     # it's init function
-    data_sampler = get_sampler(dataset, dataset_config)
+    data_sampler = get_sampler(dataset, dataset_config, sampler_seed)
     collate_function = get_collator(
         dataset_config["COLLATE_FUNCTION"], dataset_config["COLLATE_FUNCTION_PARAMS"]
     )
+
+    # Replace the worker_init_fn with a deterministic one when debugging
+    if dataset_config["USE_DEBUGGING_SAMPLER"]:
+        worker_init_fn = debugging_worker_init_fn
+
+    # Create the pytorch dataloader
     dataloader = DataLoader(
         dataset=dataset,
         num_workers=num_dataloader_workers,
@@ -177,18 +211,25 @@ def get_loader(
         drop_last=dataset_config["DROP_LAST"],
         worker_init_fn=np_seed_init,
     )
+    enable_async_gpu_copy = dataset.cfg["DATA"]["ENABLE_ASYNC_GPU_COPY"]
+    dataloader = wrap_dataloader(dataloader, enable_async_gpu_copy, device)
 
-    # If the targeted device is CUDA, set up async device copy:
-    # - makes sure that samples are on device
-    # - overlap the copy with the previous batch computation.
+    return dataloader
+
+
+def wrap_dataloader(dataloader, enable_async_gpu_copy: bool, device: torch.device):
+    """
+    If the targeted device is CUDA, set up async device copy:
+        - makes sure that samples are on device
+        - overlap the copy with the previous batch computation.
+    """
     if device.type == "cuda":
-        if dataset.cfg["DATA"]["ENABLE_ASYNC_GPU_COPY"]:
+        if enable_async_gpu_copy:
             logging.info("Wrapping the dataloader to async device copies")  # NOQA
             dataloader = DataloaderAsyncGPUWrapper(dataloader)
         else:
             logging.info("Wrapping the dataloader to synchronous device copies")  # NOQA
             dataloader = DataloaderSyncGPUWrapper(dataloader)
-
     else:
         logging.warning("Selecting a CPU device")
 

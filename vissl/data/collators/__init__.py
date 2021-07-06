@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 from functools import partial
 from pathlib import Path
@@ -57,7 +60,6 @@ def get_collator(collator_name, collate_params):
         return default_collate
     else:
         assert collator_name in COLLATOR_REGISTRY, "Unknown collator"
-        # return COLLATOR_REGISTRY[collator_name]
         return partial(COLLATOR_REGISTRY[collator_name], **collate_params)
 
 

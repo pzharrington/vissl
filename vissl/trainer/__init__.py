@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 # We need to do the imports below so that classy vision registry can run
 import vissl.data.collators  # NOQA
@@ -11,8 +14,8 @@ import vissl.models.heads  # NOQA
 import vissl.models.trunks  # NOQA
 import vissl.optimizers.param_scheduler  # NOQA
 from vissl.trainer.train_fsdp_task import SelfSupervisionFSDPTask  # NOQA
+from vissl.trainer.train_sdp_task import SelfSupervisionSDPTask  # NOQA
 from vissl.trainer.train_task import SelfSupervisionTask  # NOQA
-from vissl.trainer.train_zero_task import SelfSupervisionZeroTask  # NOQA
 from vissl.trainer.trainer_main import SelfSupervisionTrainer  # noqa
 
 

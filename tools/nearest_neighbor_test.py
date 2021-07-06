@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import sys
@@ -14,11 +17,7 @@ from vissl.models.model_helpers import get_trunk_output_feature_names
 from vissl.utils.checkpoint import get_checkpoint_folder
 from vissl.utils.distributed_launcher import launch_distributed
 from vissl.utils.env import set_env_vars
-from vissl.utils.hydra_config import (
-    convert_to_attrdict,
-    is_hydra_available,
-    print_cfg,
-)
+from vissl.utils.hydra_config import convert_to_attrdict, is_hydra_available, print_cfg
 from vissl.utils.logger import setup_logging, shutdown_logging
 from vissl.utils.misc import merge_features
 
@@ -31,7 +30,7 @@ def nearest_neighbor_test(cfg: AttrDict, layer_name: str = "heads"):
 
     ############################################################################
     # Step 1: get train and test features
-    train_out = merge_features(output_dir, "train", layer_name, cfg)
+    train_out = merge_features(output_dir, "train", layer_name)
     train_features, train_labels = train_out["features"], train_out["targets"]
     # put train features and labels on gpu and transpose train features
     train_features = torch.from_numpy(train_features).float().cuda().t()
@@ -40,7 +39,7 @@ def nearest_neighbor_test(cfg: AttrDict, layer_name: str = "heads"):
     if cfg.NEAREST_NEIGHBOR.L2_NORM_FEATS:
         train_features = nn.functional.normalize(train_features, dim=0, p=2)
 
-    test_out = merge_features(output_dir, "test", layer_name, cfg)
+    test_out = merge_features(output_dir, "test", layer_name)
     test_features, test_labels = test_out["features"], test_out["targets"]
 
     ###########################################################################

@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 """
 This script provides capability to cluster features into certain number clusters
@@ -30,12 +33,12 @@ def get_data_features_and_images(cfg: AttrDict):
     logging.info("Merging features...")
     # merge the features across all nodes/gpus into one
     feature_data = merge_features(
-        output_dir, split.lower(), cfg.CLUSTERFIT.FEATURES.LAYER_NAME, cfg
+        output_dir, split.lower(), cfg.CLUSTERFIT.FEATURES.LAYER_NAME
     )
 
     logging.info("Getting the image paths...")
     # get the list of image Ids
-    dataset = build_dataset(cfg, split)
+    dataset = build_dataset(cfg=cfg, split=split)
     feature_image_paths = dataset.get_image_paths()
     # due to multi-modality, we get image_paths as a nested list, one for each
     # dataset. Check it's a list and extract images.

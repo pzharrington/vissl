@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import sys
@@ -9,7 +12,7 @@ import tqdm
 from fvcore.common.timer import Timer
 from hydra.experimental import compose, initialize_config_module
 from vissl.config import AttrDict
-from vissl.data import build_dataset, get_loader
+from vissl.data import build_dataloader, build_dataset
 from vissl.utils.hydra_config import convert_to_attrdict, is_hydra_available
 from vissl.utils.logger import setup_logging
 
@@ -23,20 +26,22 @@ def benchmark_data(cfg: AttrDict, split: str = "train"):
     split = split.upper()
     total_images = MAX_ITERS * cfg["DATA"][split]["BATCHSIZE_PER_REPLICA"]
     timer = Timer()
-    dataset = build_dataset(cfg, split)
+    dataset = build_dataset(cfg=cfg, split=split)
 
     try:
         device = torch.device("cuda" if cfg.MACHINE.DEVICE == "gpu" else "cpu")
     except AttributeError:
         device = torch.device("cuda")
 
-    dataloader = get_loader(
+    dataloader = build_dataloader(
         dataset=dataset,
         dataset_config=cfg["DATA"][split],
         num_dataloader_workers=cfg.DATA.NUM_DATALOADER_WORKERS,
         pin_memory=False,
         multi_processing_method=cfg.MULTI_PROCESSING_METHOD,
         device=device,
+        sampler_seed=cfg.SEED_VALUE,
+        split=split,
     )
 
     # Fairstore data sampler would require setting the start iter before it can start.

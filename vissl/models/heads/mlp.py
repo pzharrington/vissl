@@ -1,10 +1,15 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 from typing import List
 
 import torch
 import torch.nn as nn
 from vissl.config import AttrDict
 from vissl.models.heads import register_model_head
+from vissl.utils.fsdp_utils import fsdp_auto_wrap_bn, fsdp_wrapper
 
 
 @register_model_head("mlp")
@@ -36,6 +41,7 @@ class MLP(nn.Module):
         use_relu: bool = False,
         use_dropout: bool = False,
         use_bias: bool = True,
+        skip_last_layer_relu_bn: bool = True,
     ):
         """
         Args:
@@ -47,12 +53,18 @@ class MLP(nn.Module):
             use_bias (bool): whether the Linear layer should have bias or not
             dims (int): dimensions of the linear layer. Example [8192, 1000] which
                         attaches `nn.Linear(8192, 1000, bias=True)`
+            skip_last_layer_relu_bn (bool): If the MLP has many layers, we check
+                if after the last MLP layer, we should add BN / ReLU or not. By
+                default, skip it. If user specifies to not skip, then BN will be
+                added if use_bn=True, ReLU will be added if use_relu=True
         """
         super().__init__()
         layers = []
         last_dim = dims[0]
-        for dim in dims[1:]:
+        for i, dim in enumerate(dims[1:]):
             layers.append(nn.Linear(last_dim, dim, bias=use_bias))
+            if i == len(dims) - 2 and skip_last_layer_relu_bn:
+                break
             if use_bn:
                 layers.append(
                     nn.BatchNorm1d(
@@ -63,9 +75,9 @@ class MLP(nn.Module):
                 )
             if use_relu:
                 layers.append(nn.ReLU(inplace=True))
-                last_dim = dim
             if use_dropout:
                 layers.append(nn.Dropout())
+            last_dim = dim
         self.clf = nn.Sequential(*layers)
         # we use the default normal or uniform initialization for the layers
         # and allow users to scale the initialization.
@@ -98,3 +110,26 @@ class MLP(nn.Module):
             batch = batch.reshape((batch.size(0), batch.size(1)))
         out = self.clf(batch)
         return out
+
+
+@register_model_head("mlp_fsdp")
+def MLP_FSDP(
+    model_config: AttrDict,
+    dims: List[int],
+    use_bn: bool = False,
+    use_relu: bool = False,
+    use_dropout: bool = False,
+    use_bias: bool = True,
+    skip_last_layer_relu_bn: bool = True,
+):
+    mlp = MLP(
+        model_config,
+        dims,
+        use_bn,
+        use_relu,
+        use_dropout,
+        use_bias,
+        skip_last_layer_relu_bn,
+    )
+    mlp = fsdp_auto_wrap_bn(mlp)
+    return fsdp_wrapper(mlp, **model_config.FSDP_CONFIG)

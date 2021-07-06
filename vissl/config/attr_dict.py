@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 
 class AttrDict(dict):
@@ -18,6 +21,21 @@ class AttrDict(dict):
                 self[key] = AttrDict(value)
             else:
                 self[key] = value
+
+    def to_dict(self):
+        """
+        Convert the AttrDict back to a dictionary.
+
+        Helpful to feed the configuration to generic functions
+        which only accept primitive types
+        """
+        dict = {}
+        for k, v in self.items():
+            if isinstance(v, AttrDict):
+                dict[k] = v.to_dict()
+            else:
+                dict[k] = v
+        return dict
 
     def __getattr__(self, key):
         """

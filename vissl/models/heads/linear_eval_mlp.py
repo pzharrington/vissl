@@ -1,4 +1,8 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 from typing import List
 
 import torch
@@ -6,6 +10,7 @@ import torch.nn as nn
 from vissl.config import AttrDict
 from vissl.models.heads import register_model_head
 from vissl.models.heads.mlp import MLP
+from vissl.utils.fsdp_utils import fsdp_auto_wrap_bn, fsdp_wrapper
 
 
 @register_model_head("eval_mlp")
@@ -44,7 +49,6 @@ class LinearEvalMLP(nn.Module):
             eps=model_config.HEAD.BATCHNORM_EPS,
             momentum=model_config.HEAD.BATCHNORM_MOMENTUM,
         )
-
         self.clf = MLP(model_config, dims, use_bn=use_bn, use_relu=use_relu)
 
     def forward(self, batch: torch.Tensor):
@@ -66,3 +70,16 @@ class LinearEvalMLP(nn.Module):
         out = torch.flatten(out, start_dim=1)
         out = self.clf(out)
         return out
+
+
+@register_model_head("eval_mlp_fsdp")
+def FSDPLinearEvalMLP(
+    model_config: AttrDict,
+    in_channels: int,
+    dims: List[int],
+    use_bn: bool = False,
+    use_relu: bool = False,
+):
+    mlp = LinearEvalMLP(model_config, in_channels, dims, use_bn, use_relu)
+    mlp = fsdp_auto_wrap_bn(mlp)
+    return fsdp_wrapper(mlp, **model_config.FSDP_CONFIG)

@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import sys
@@ -15,13 +18,9 @@ from fvcore.common.file_io import PathManager
 from hydra.experimental import compose, initialize_config_module
 from vissl.config import AttrDict
 from vissl.models import build_model
-from vissl.utils.checkpoint import init_model_from_weights
+from vissl.utils.checkpoint import init_model_from_consolidated_weights
 from vissl.utils.env import set_env_vars
-from vissl.utils.hydra_config import (
-    convert_to_attrdict,
-    is_hydra_available,
-    print_cfg,
-)
+from vissl.utils.hydra_config import convert_to_attrdict, is_hydra_available, print_cfg
 from vissl.utils.instance_retrieval_utils.data_util import (
     InstanceRetrievalDataset,
     InstanceRetrievalImageLoader,
@@ -60,7 +59,7 @@ def build_retrieval_model(cfg):
         append_prefix = cfg.MODEL.WEIGHTS_INIT.get("APPEND_PREFIX", None)
         state_dict_key_name = cfg.MODEL.WEIGHTS_INIT.get("STATE_DICT_KEY_NAME", None)
 
-        init_model_from_weights(
+        init_model_from_consolidated_weights(
             cfg,
             model,
             weights,

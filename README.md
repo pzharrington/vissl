@@ -8,7 +8,7 @@ This fork of [facebook research's vissl library](https://vissl.readthedocs.io/en
 ### Installing+running at NERSC
 To run in the pytorch ngc container using shifter, add the following flags to any `sbatch` scripts or `salloc` commands:
 ```
---image=nersc/pytorch:ngc-20.10-v0 --volume="/dev/infiniband:/sys/class/infiniband_verbs"
+--image=nersc/pytorch:ngc-20.10-v0"
 ```
 
 Install from source for now to incorporate more recent `vissl` changes (not sure how frequently the pypi package will be updated). To do this from the container with the appropriate path set for `$PYTHONUSERBASE` (to install base packages), `salloc` with the above flags and then do
@@ -38,7 +38,6 @@ logger.warning(
          "** fvcore version of PathManager will be deprecated soon. **\n"
          "** Please migrate to the version in iopath repo. **\n"
          "https://github.com/facebookresearch/iopath \n"
-
 )
 ```
 This will save you tons of chatter until upstream `vissl` fixes this.

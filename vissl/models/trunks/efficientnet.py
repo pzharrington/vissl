@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 from typing import List
@@ -25,7 +28,7 @@ class EfficientNet(nn.Module):
         super(EfficientNet, self).__init__()
         assert model_config.INPUT_TYPE in ["rgb", "bgr"], "Input type not supported"
 
-        trunk_config = model_config.TRUNK.TRUNK_PARAMS.EFFICIENT_NETS
+        trunk_config = model_config.TRUNK.EFFICIENT_NETS
         assert "model_version" in trunk_config, "Please specify EfficientNet version"
         model_version = trunk_config["model_version"]
         model_params = MODEL_PARAMS[model_version]

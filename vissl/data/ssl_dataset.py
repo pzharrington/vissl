@@ -1,17 +1,20 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
-from typing import Callable, Dict, Set
+from typing import Any, Callable, Dict, Set
 
 import numpy as np
 from classy_vision.generic.distributed_util import get_world_size
 from fvcore.common.file_io import PathManager
-from torch.utils.data import Dataset
 from vissl.config import AttrDict
 from vissl.data import dataset_catalog
 from vissl.data.data_helper import balanced_sub_sampling, unbalanced_sub_sampling
 from vissl.data.ssl_transforms import get_transform
 from vissl.data.decals_h5_source import load_specz_labels
+from vissl.data.vissl_dataset_base import VisslDatasetBase
 from vissl.utils.env import get_machine_local_and_dist_rank
 
 
@@ -31,7 +34,7 @@ def _convert_lbl_to_long(lbl):
     return out_lbl
 
 
-class GenericSSLDataset(Dataset):
+class GenericSSLDataset(VisslDatasetBase):
     """
     Base Self Supervised Learning Dataset Class.
 
@@ -72,6 +75,7 @@ class GenericSSLDataset(Dataset):
         split: str,
         dataset_source_map: Dict[str, Callable],
         data_sources_with_subset: Set[str],
+        **kwargs,
     ):
         self.cfg = cfg
         self.split = split
@@ -259,6 +263,8 @@ class GenericSSLDataset(Dataset):
 
             elif label_source == "torchvision_dataset":
                 labels = np.array(self.data_objs[idx].get_labels()).astype(np.int64)
+            elif label_source == "synthetic":
+                labels = np.array([0 for _ in range(len(self.data_objs[idx]))])
             else:
                 raise ValueError(f"unknown label source: {label_source}")
             self.label_objs.append(labels)
@@ -414,7 +420,10 @@ class GenericSSLDataset(Dataset):
                                             data source.
         """
         image_paths = []
-        for source in self.data_objs:
+        for i, source in enumerate(self.data_objs):
+            if not getattr(source, "get_image_paths", 0):
+                msg = f"Cannot retrieve image paths for source {self.data_sources[i]}"
+                raise ValueError(msg)
             image_paths.append(source.get_image_paths())
         return image_paths
 
@@ -439,3 +448,22 @@ class GenericSSLDataset(Dataset):
         The global batch size across all the trainers
         """
         return self.get_batchsize_per_replica() * get_world_size()
+
+    def get_classy_state(self):
+        """
+        No-op method. Used with other datasets that need state.
+        """
+        return {}
+
+    def set_classy_state(self, state: Dict[str, Any]):
+        """
+        No-op method. Used with other datasets that need state.
+        """
+        pass
+
+    def rebuild_dataloader(self):
+        """
+        Whether or not to rebuild the dataloader. This is called
+        after every training phase.
+        """
+        return False

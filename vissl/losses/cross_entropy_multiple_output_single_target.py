@@ -1,6 +1,8 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 
-import logging
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 from typing import List, Union
 
 import torch
@@ -72,13 +74,9 @@ class CrossEntropyMultipleOutputSingleTargetLoss(ClassyLoss):
 
     def _create_loss_function(self):
         copy_to_gpu = is_on_gpu(self._losses)
-        logging.info(
-            "Instantiating "
-            "CrossEntropyMultipleOutputSingleTargetLoss, which"
-            "internally uses SmoothCrossEntropy loss to accommodate"
-            "label smoothing, but defaults to vanilla cross-entropy "
-            "if provided single-target labels."
-        )
+        # Instantiating CrossEntropyMultipleOutputSingleTargetLoss, which
+        # internally uses SmoothCrossEntropy loss to accommodate label smoothing,
+        # but defaults to vanilla cross-entropy if provided single-target labels.
         self._losses.append(
             SmoothCrossEntropy(weight=self._weight, ignore_index=self._ignore_index)
         )

@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 from typing import Any, Dict
@@ -32,7 +35,7 @@ class ImgRotatePil(ClassyTransform):
         self.num_rotations_per_img = num_rotations_per_img
         # the last angle is 360 and 1st angle is 0, both give the original image.
         # 360 is not useful so remove it
-        self.angles = torch.linspace(0, 360, num_angles + 1)[:-1]
+        self.angles = torch.linspace(0, 360, num_angles + 1)[:-1].tolist()
 
     def __call__(self, image):
         label = torch.randint(self.num_angles, [1]).item()

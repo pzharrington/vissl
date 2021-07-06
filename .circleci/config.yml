@@ -1,4 +1,8 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
 # Python CircleCI 2.0 configuration file
 #
 # Check https://circleci.com/docs/2.0/language-python/ for more details
@@ -80,7 +84,11 @@ setup_venv: &setup_venv
         python --version
         which python
         which pip
+        pip --version
         pip install --upgrade pip
+        which python
+        which pip
+        pip --version
         pip install -U setuptools
 
 pip_list: &pip_list
@@ -145,7 +153,7 @@ jobs:
       # Cache the vissl_venv directory that contains dependencies
       - restore_cache:
           keys:
-            - v2-cpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}
+            - v3-cpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}
 
       - <<: *install_vissl_dep
       - <<: *install_classy_vision
@@ -155,14 +163,14 @@ jobs:
       - save_cache:
           paths:
             - ~/vissl_venv
-          key: v2-cpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}
+          key: v3-cpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}
 
       - <<: *install_vissl
 
       - run:
           name: isort
           command: |
-            isort -y -sp .
+            isort --sp . .
       - run:
           name: black
           command: |
@@ -188,7 +196,7 @@ jobs:
       # Download and cache dependencies
       - restore_cache:
           keys:
-            - v2-gpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}-{{ checksum "docker/common/install_apex.sh" }}
+            - v3-gpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}-{{ checksum "docker/common/install_apex.sh" }}
 
       - <<: *install_vissl_dep
       - <<: *install_classy_vision
@@ -203,7 +211,7 @@ jobs:
       - save_cache:
           paths:
             - ~/vissl_venv
-          key: v2-gpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}-{{ checksum "docker/common/install_apex.sh" }}
+          key: v3-gpu-dependencies-{{ checksum "requirements.txt" }}-{{ checksum "setup.py" }}-{{ checksum "docker/common/install_apex.sh" }}
 
       - <<: *install_vissl
 

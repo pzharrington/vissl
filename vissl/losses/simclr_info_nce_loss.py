@@ -1,4 +1,7 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
+
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
 
 import logging
 import pprint
@@ -9,7 +12,7 @@ from classy_vision.generic.distributed_util import get_cuda_device_index, get_ra
 from classy_vision.losses import ClassyLoss, register_loss
 from torch import nn
 from vissl.config import AttrDict
-from vissl.utils.distributed_gradients import gather_from_all
+from vissl.utils.distributed_utils import gather_from_all
 
 
 @register_loss("simclr_info_nce_loss")
