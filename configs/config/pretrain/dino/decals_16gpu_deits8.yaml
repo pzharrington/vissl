@@ -12,11 +12,16 @@ config:
       PERF_STAT_FREQUENCY: 40
       ROLLING_BTIME_FREQ: 5
   DATA:
-    NUM_DATALOADER_WORKERS: 10
+    NUM_DATALOADER_WORKERS: 32
+    DECALS:
+      H5KEY_IMG: images
+      H5KEY_LAB: specz
+      DEREDDENED: True
+      FILTERS_USE: &filters_use ['g', 'r', 'z']
     TRAIN:
-      DATA_SOURCES: [disk_folder]
-      DATASET_NAMES: [imagenet1k_folder]
-      BATCHSIZE_PER_REPLICA: 64
+      DATA_SOURCES: [decals_hdf5]
+      DATASET_NAMES: [decals_PM_pretrain_south]
+      BATCHSIZE_PER_REPLICA: 128
       LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used
       TRANSFORMS:
         - name: ImgNpyToMultiCrop
@@ -24,19 +29,22 @@ config:
           size_crops: [136, 68] # # sqrt(2)*[96, 48] as RR+JC comes after; imagenet was [224, 96] 
           num_crops: [2, 8]
           crop_scales: [[0.9, 1.1], [0.3, 0.55]]
+          flip_axes: True
         - name: RandomRotateDecals
-        - name: ImgPilMultiCropRandomApply
+        - name: ImgNpyMultiCropRandomApply
           transforms: [{"name": "CenterCropDecals", "outdim": 96, "jitter_lim": 7}]
           prob: [1., 1., 0., 0., 0., 0., 0., 0., 0., 0.] # 96 dim crops only for "global" views
-        - name: ImgPilMultiCropRandomApply
+        - name: ImgNpyMultiCropRandomApply
           transforms: [{"name": "CenterCropDecals", "outdim": 48, "jitter_lim": 3}]
           prob: [0., 0., 1., 1., 1., 1., 1., 1., 1., 1.] # 48 dim crops only for "global" views
-        - name: ImgPilMultiCropRandomApply
-          transforms: [{"name": "ReddeningDecals", "uniform": False, "filters_use": *filters_use, "ebv_max": 1.0}]
-          prob: [1., 1., 1., 1., 1., 1., 1., 1., 1., 1.]
-        - name: ImgPilMultiCropRandomApply
-          transforms: [{"name": "GaussianNoiseDecals", "mean": 0, "im_ch": 3, "uniform": False}]
-          prob: [1., 1., 1., 1., 1., 1., 1., 1., 1., 1.]
+        - name: ReddeningDecals
+          uniform: False
+          filters_use: *filters_use
+          ebv_max: 1.0
+        - name: GaussianNoiseDecals
+          mean: 0
+          im_ch: 3
+          uniform: False
         - name: ToTensor
       COLLATE_FUNCTION: multicrop_collator
       MMAP_MODE: True
@@ -90,14 +98,15 @@ config:
       regularize_bn: False
       regularize_bias: False
       param_schedulers:
+        # base DINO does lr=0.0005*bs/256=0.002
         lr_head:
           name: composite
           schedulers:
             - name: linear
               start_value: 0.00001
-              end_value: 0.002
+              end_value: &main_lr 0.004
             - name: cosine
-              start_value: 0.002
+              start_value: *main_lr
               end_value: 0.00001
           update_interval: epoch
           interval_scaling: [rescaled, fixed]
@@ -107,9 +116,9 @@ config:
           schedulers:
             - name: linear
               start_value: 0.00001
-              end_value: 0.002
+              end_value: *main_lr
             - name: cosine
-              start_value: 0.002
+              start_value: *main_lr
               end_value: 0.00001
           update_interval: epoch
           interval_scaling: [rescaled, fixed]
@@ -126,8 +135,8 @@ config:
           update_interval: epoch
   DISTRIBUTED:
     BACKEND: nccl
-    NUM_NODES: 2
-    NUM_PROC_PER_NODE: 8
+    NUM_NODES: 4
+    NUM_PROC_PER_NODE: 4
     INIT_METHOD: tcp
     RUN_ID: auto
   MACHINE:

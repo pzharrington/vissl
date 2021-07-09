@@ -172,5 +172,9 @@
                   "/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5"],
         "val": ["/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5", 
                 "/global/cscratch1/sd/pharring/decals_data/striped/images_npix152_000000000_002068479_nochunk_par.h5"]
+    },
+    "decals_PM_pretrain_south": {
+        "train": ["/pscratch/sd/p/pharring/decals_data/south-train/images_npix152_000000000_003500000.h5", "<lbl_path>"],
+        "val": ["<img_path>", "<lbl_path>"]
     }
 }

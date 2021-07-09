@@ -221,6 +221,8 @@ config:
       DEREDDENED: True
       # Which filters to use
       FILTERS_USE: ['g', 'r', 'z']
+      # Channel axis location
+      FORMAT: "HWC"
 
      # Training Data Options
     TRAIN:

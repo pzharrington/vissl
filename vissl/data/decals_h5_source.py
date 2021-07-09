@@ -38,6 +38,7 @@ class DecalsHDF5Dataset(Dataset):
         self.labkey = cfg["DATA"]["DECALS"]["H5KEY_LAB"]
         self.dered = cfg["DATA"]["DECALS"]["DEREDDENED"]
         self.filters_use = cfg["DATA"]["DECALS"]["FILTERS_USE"]
+        self.format = cfg["DATA"]["DECALS"]["FORMAT"]
         self._check_consistent_filters()
 
         with h5py.File(self._path, 'r') as hf:
@@ -58,11 +59,13 @@ class DecalsHDF5Dataset(Dataset):
     def __getitem__(self, idx):
         if not hasattr(self, 'hfile'):
             self._open_file()
-        # SDSS data is in NCHW format, unlike HSC - which is in NHWC format.
-        im = np.swapaxes(self.hfile[self.imkey][idx], 0, 2) # im is WHC
+        if self.format == 'HWC':
+            im = np.swapaxes(self.hfile[self.imkey][idx], 0, 2)
+        else:
+            im = self.hfile[self.imkey][idx]
         if self.dered:
             ebv = self.hfile['ebv'][idx]
-            im = self.deredden(im, ebv)
+            im = self.deredden(im, ebv, self.format)
         return im.astype(np.float32), True
 
     def _check_consistent_filters(self):
@@ -71,10 +74,14 @@ class DecalsHDF5Dataset(Dataset):
            if 'filters_use' in t.keys():
                assert t['filters_use'] == self.filters_use, 'Filters used in transform %s must match DATA.FILTERS_USE'%t['name']
 
-    def deredden(self, raw_image, ebv_i):
+    def deredden(self, raw_image, ebv_i, fmt):
         # De-redden image given SFD98 ebv value
         transmission_i = self.ebv_to_transmission(ebv_i)
-        return raw_image/transmission_i
+        if fmt == 'CHW':
+            # So numpy broadcasting doesn't complain
+            return raw_image/np.expand_dims(transmission_i, (1,2))
+        else:
+            return raw_image/transmission_i
 
     def ebv_to_transmission(self, ebv):
         # ebv to transmission is just a simple power law I fit for each band - works perfectly

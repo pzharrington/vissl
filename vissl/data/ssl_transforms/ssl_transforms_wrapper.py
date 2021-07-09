@@ -17,8 +17,9 @@ _TRANSFORMS_WITH_COPIES = [
     "ImgReplicatePil",
     "ImgPilToPatchesAndImage",
     "ImgPilToMultiCrop",
+    "ImgNpyToMultiCrop",
 ]
-_TRANSFORMS_WITH_GROUPING = ["ImgPilMultiCropRandomApply"]
+_TRANSFORMS_WITH_GROUPING = ["ImgPilMultiCropRandomApply", "ImgNpyMultiCropRandomApply"]
 _TRANSFORMS_WITH_OVERWRITE_ENTIRE_BATCH = []
 
 DEFAULT_TRANSFORM_TYPES = {
@@ -129,6 +130,7 @@ class SSLTransformsWrapper(ClassyTransform):
             "ImgReplicatePil",
             "ImgPilToPatchesAndImage",
             "ImgPilToMultiCrop",
+            "ImgNpyToMultiCrop",
         ]
         """
         return self.name in self.transforms_with_copies
@@ -141,7 +143,7 @@ class SSLTransformsWrapper(ClassyTransform):
 
     def _is_grouping_transform(self):
         """
-        _TRANSFORMS_WITH_GROUPING = ["ImgPilMultiCropRandomApply"]
+        _TRANSFORMS_WITH_GROUPING = ["ImgPilMultiCropRandomApply", "ImgNpyMultiCropRandomApply"]
         """
         return self.name in self.transforms_with_grouping
 
