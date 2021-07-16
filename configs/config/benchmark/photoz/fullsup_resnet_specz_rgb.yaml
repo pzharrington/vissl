@@ -59,7 +59,6 @@ config:
     photoz_exp:
       specz_range: *specz_range
       specz_nbins: *specz_nbins
-      max_num_samples: 25000
   TRAINER:
     TRAIN_STEP_NAME: standard_train_step
   MODEL:

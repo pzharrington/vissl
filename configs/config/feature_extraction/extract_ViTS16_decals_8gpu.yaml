@@ -1,0 +1,45 @@
+# @package _global_
+engine_name: extract_features
+config:
+  DATA:
+    NUM_DATALOADER_WORKERS: 32
+    DECALS:
+      H5KEY_IMG: images
+      H5KEY_LAB: specz
+      DEREDDENED: True
+      FILTERS_USE: &filters_use ['g', 'r', 'z']
+    TRAIN:
+      DATA_SOURCES: [decals_hdf5]
+      DATASET_NAMES: [decals_TH_pretrain_south]
+      BATCHSIZE_PER_REPLICA: 128
+      LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used
+      TRANSFORMS:
+        - name: CenterCropDecals
+          outdim: 96
+          jitter_lim: 0
+        - name: RGBifyDecals
+        - name: ToTensor
+      COPY_TO_LOCAL_DISK: False
+      DROP_LAST: False
+    TEST:
+      DATA_SOURCES: [decals_hdf5]
+      DATASET_NAMES: [decals_TH_pretrain_south]
+      BATCHSIZE_PER_REPLICA: 128
+      TRANSFORMS:
+        - name: CenterCropDecals
+          outdim: 96
+          jitter_lim: 0
+        - name: RGBifyDecals
+        - name: ToTensor
+      COPY_TO_LOCAL_DISK: False
+      DROP_LAST: False
+
+  MODEL:
+    WEIGHTS_INIT:
+      PARAMS_FILE: "specify the model weights"
+      STATE_DICT_KEY_NAME: classy_state_dict
+  DISTRIBUTED:
+    NUM_NODES: 1
+    NUM_PROC_PER_NODE: 8
+  MACHINE:
+    DEVICE: gpu

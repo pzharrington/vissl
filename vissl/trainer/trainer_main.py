@@ -434,6 +434,7 @@ class SelfSupervisionTrainer(object):
                 }
                 with torch.no_grad():
                     features = task.model(input_sample["input"])
+                    features = [features] if not isinstance(features, list) else features
                     flat_features_list = self._flatten_features_list(features)
                     num_images = input_sample["inds"].shape[0]
                     feature_buffer_size += num_images
