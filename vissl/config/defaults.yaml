@@ -212,8 +212,9 @@ config:
       # keyname in hdf5 file to acces images
       H5KEY_IMG: images
       # keyname in hdf5 to access target/labels for supervised training
+      # use "external" for external numpy file for labels
       H5KEY_LAB: z_spec
-      # specz range (min, max) for binned-classification
+      # external numpy file with labels
       SPECZ_RANGE: [0.0, 1.2]
       # number of specz bins for binned-classification
       SPECZ_NBINS: 256
@@ -223,9 +224,19 @@ config:
       FILTERS_USE: ['g', 'r', 'z']
       # Channel axis location
       FORMAT: "HWC"
+      # Settings for Multi-file loader (unused in ordinary decals_h5_source)
+      MULTI:
+        # total number of samples
+        NTOT: 42272646
+        # samples per file
+        CHUNK: 1000000
+        # directory with list of files
+        DIR: "/global/cfs/cdirs/cusp/LBL/decals_galaxy_survey/images/south/"
 
      # Training Data Options
     TRAIN:
+      # external numpy file with labels
+      NPY_LABEL_PATH: "./"
       # A sampler that cuts the dataset in a deterministic way
       USE_DEBUGGING_SAMPLER: False
 
@@ -381,6 +392,8 @@ config:
       # QueueDataset, you can instead return a valid and previously seen image.
       ENABLE_QUEUE_DATASET: False
     TEST:
+      # external numpy file with labels
+      NPY_LABEL_PATH: "./"
       # A sampler that cuts the dataset in a deterministic way
       USE_DEBUGGING_SAMPLER: False
       # if we want to resume the data sampler as well from a previous iteration

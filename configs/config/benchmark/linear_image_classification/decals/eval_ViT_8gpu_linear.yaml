@@ -8,7 +8,7 @@ config:
   MULTI_PROCESSING_METHOD: forkserver
   HOOKS:
     PERF_STATS:
-      MONITOR_PERF_STATS: False
+      MONITOR_PERF_STATS: True
       PERF_STAT_FREQUENCY: 40
       ROLLING_BTIME_FREQ: 5
     TENSORBOARD_SETUP:
@@ -21,42 +21,46 @@ config:
     NUM_DATALOADER_WORKERS: 32
     DECALS:
       H5KEY_IMG: images
-      H5KEY_LAB: specz
+      H5KEY_LAB: external
       DEREDDENED: True
       FILTERS_USE: &filters_use ['g', 'r', 'z']
     TRAIN:
-      DATA_SOURCES: [decals_hdf5]
-      DATASET_NAMES: [decals_TH_pretrain_south]
-      BATCHSIZE_PER_REPLICA: 256
+      DATA_SOURCES: [decals_multihdf5]
+      LABEL_SOURCES: [decals_multihdf5]
+      DATASET_NAMES: [decals_PM_lenses_south]
+      NPY_LABEL_PATH: "/pscratch/sd/p/pharring/decals_data/lenslabs/labels_fake_train.npy" #"/global/cfs/cdirs/cusp/LBL/decals_galaxy_survey/external_catalogues/strong_lenses/predictions/8hour_south_train_largequeue/v1/labels_predict_train.npy"
+      SUBSET: "/global/cfs/cdirs/cusp/LBL/decals_galaxy_survey/external_catalogues/strong_lenses/predictions/8hour_south_train_largequeue/v1/inds_train.npy"
+      BATCHSIZE_PER_REPLICA: 4096
       TRANSFORMS:
         - name: CenterCropDecals
           outdim: 96
-          jitter_lim: 7
+          jitter_lim: 0
         - name: RGBifyDecals
         - name: ToTensor
       MMAP_MODE: True
       COPY_TO_LOCAL_DISK: False
       COPY_DESTINATION_DIR: /tmp/imagenet1k/
-      DROP_LAST: True
     TEST:
-      DATA_SOURCES: [decals_hdf5]
-      DATASET_NAMES: [decals_TH_pretrain_south]
-      BATCHSIZE_PER_REPLICA: 256
+      DATA_SOURCES: [decals_multihdf5]
+      LABEL_SOURCES: [decals_multihdf5]
+      DATASET_NAMES: [decals_PM_lenses_south]
+      NPY_LABEL_PATH: "/global/cfs/cdirs/cusp/LBL/decals_galaxy_survey/external_catalogues/strong_lenses/predictions/8hour_south_train_largequeue/v1/labels_true_valid.npy"
+      SUBSET: "/global/cfs/cdirs/cusp/LBL/decals_galaxy_survey/external_catalogues/strong_lenses/predictions/8hour_south_train_largequeue/v1/inds_valid.npy"
+      BATCHSIZE_PER_REPLICA: 4096
       TRANSFORMS:
         - name: CenterCropDecals
           outdim: 96
-          jitter_lim: 7
+          jitter_lim: 0
         - name: RGBifyDecals
         - name: ToTensor
       MMAP_MODE: True
       COPY_TO_LOCAL_DISK: False
       COPY_DESTINATION_DIR: /tmp/imagenet1k/
-      DROP_LAST: True
-  METERS:
-    name: accuracy_list_meter
-    accuracy_list_meter:
-      num_meters: 1
-      topk_values: [1]
+  #METERS:
+  #  name: accuracy_list_meter
+  #  accuracy_list_meter:
+  #    num_meters: 1
+  #    topk_values: [1]
   TRAINER:
     TRAIN_STEP_NAME: standard_train_step
   MODEL:
@@ -80,13 +84,16 @@ config:
         DROP_PATH_RATE: 0.1 # stochastic depth dropout probability
     HEAD:
       PARAMS: [
-        ["eval_mlp", {"in_channels": 384, "dims": [384, 2]}],
+        ["eval_mlp", {"in_channels": 384, "dims": [384, 1]}],
       ]
     AMP_PARAMS:
       AMP_TYPE: pytorch
       USE_AMP: True
   LOSS:
     name: bce_logits_multiple_output_single_target
+    #name: BCEWithLogitsLoss
+    #BCEWithLogitsLoss:
+    #  reduction: 'mean'
   OPTIMIZER:
     name: sgd
     weight_decay: 0.

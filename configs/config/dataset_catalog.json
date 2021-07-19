@@ -177,6 +177,10 @@
         "train": ["/pscratch/sd/p/pharring/decals_data/south-train/images_npix152_000000000_003500000.h5", "<lbl_path>"],
         "val": ["<img_path>", "<lbl_path>"]
     },
+    "decals_PM_lenses_south": {
+        "train": ["/pscratch/sd/p/pharring/decals_data/south-train/images_npix152_000000000_003500000.h5", "/pscratch/sd/p/pharring/decals_data/south-train/images_npix152_000000000_003500000.h5"],
+        "val":  ["/pscratch/sd/p/pharring/decals_data/south-train/images_npix152_000000000_003500000.h5", "/pscratch/sd/p/pharring/decals_data/south-train/images_npix152_000000000_003500000.h5"]
+    },
     "decals_TH_pretrain_south": {
         "train": ["/grand/skysurvey_adsp/decals_galaxy_survey/data/images/south-train/images_npix152_000000000_003500000.h5", "/grand/skysurvey_adsp/decals_galaxy_survey/data/images/south-train/images_npix152_000000000_003500000.h5"],
         "val": ["/grand/skysurvey_adsp/decals_galaxy_survey/data/images/south-train/images_npix152_000000000_003500000.h5", "/grand/skysurvey_adsp/decals_galaxy_survey/data/images/south-train/images_npix152_000000000_003500000.h5"]

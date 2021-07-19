@@ -33,6 +33,7 @@ from vissl.utils.misc import set_dataloader_seeds, setup_multiprocessing_method
 import numpy as np
 # import custom data source
 from vissl.data.decals_h5_source import DecalsHDF5Dataset
+from vissl.data.decals_multih5_source import DecalsMultiHDF5Dataset
 
 
 __all__ = [
@@ -49,7 +50,8 @@ DATASET_SOURCE_MAP = {
     "disk_folder": DiskImageDataset,
     "torchvision_dataset": TorchvisionDataset,
     "synthetic": SyntheticImageDataset,
-    "decals_hdf5": DecalsHDF5Dataset
+    "decals_hdf5": DecalsHDF5Dataset,
+    "decals_multihdf5": DecalsMultiHDF5Dataset
 }
 
 

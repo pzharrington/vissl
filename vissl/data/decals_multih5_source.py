@@ -4,41 +4,27 @@ import numpy as np
 import skimage.transform
 import skimage.filters
 import logging
+import os
 
-def load_specz_labels(path, cfg):
-    key = cfg["DATA"]["DECALS"]["H5KEY_LAB"]
-    with h5py.File(path, 'r') as f:
-        z = f[key][...].astype(np.float32)
-    zlo, zhi = cfg["DATA"]["DECALS"]["SPECZ_RANGE"]
-    Nbins = cfg["DATA"]["DECALS"]["SPECZ_NBINS"]
-    zbins = np.linspace(zlo, zhi, num=Nbins+1, endpoint=True).astype(np.float32)
-    labels = np.digitize(z, bins=zbins, right=True) - 1
-    return labels
-
-
-def load_lens_labels(path):
-    labels = np.load(path)
-    return np.expand_dims(labels, 1)
-
-
-class DecalsHDF5Dataset(Dataset):
+class DecalsMultiHDF5Dataset(Dataset):
     def __init__(self, cfg, data_source, path, split, dataset_name):
         """
         Read from hdf5 file on disk, which holds images, targets, and auxiliary fields as 
         separate dataset keys under the root hdf5 group (first index for each indexes unique samples)
         """
-        super(DecalsHDF5Dataset, self).__init__()
+        super(DecalsMultiHDF5Dataset, self).__init__()
         assert data_source in [
             "disk_filelist",
             "disk_folder",
-            "decals_hdf5"
+            "decals_hdf5",
+            "decals_multihdf5"
         ], "data_source must be either disk_filelist or disk_folder or decals_hdf5"
         self.cfg = cfg
         self.split = split
         self.dataset_name = dataset_name
         self.data_source = data_source
         self._path = path
-
+        
 
         self.imkey = cfg["DATA"]["DECALS"]["H5KEY_IMG"]
         self.labkey = cfg["DATA"]["DECALS"]["H5KEY_LAB"]
@@ -47,11 +33,15 @@ class DecalsHDF5Dataset(Dataset):
         self.format = cfg["DATA"]["DECALS"]["FORMAT"]
         self._check_consistent_filters()
 
-        with h5py.File(self._path, 'r') as hf:
-            self._num_samples = hf[self.imkey].shape[0]
-
-    def _open_file(self):
-        self.hfile = h5py.File(self._path, 'r')
+        self._num_samples = cfg["DATA"]["DECALS"]["MULTI"]["NTOT"]
+        self.chunk = cfg["DATA"]["DECALS"]["MULTI"]["CHUNK"]
+        self.file_list = []
+        self.opened = []
+        for n in sorted(os.listdir(cfg["DATA"]["DECALS"]["MULTI"]["DIR"])):
+            if '.h5' in n or '.hdf5' in n: 
+                self.file_list.append(os.path.join(cfg["DATA"]["DECALS"]["MULTI"]["DIR"], n))
+                self.opened.append(False)
+        logging.info('DecalsMultiHDF5Dataset using files from %s'%cfg["DATA"]["DECALS"]["MULTI"]["DIR"])
 
     def num_samples(self):
         """
@@ -63,14 +53,22 @@ class DecalsHDF5Dataset(Dataset):
         return self.num_samples()
 
     def __getitem__(self, idx):
-        if not hasattr(self, 'hfile'):
-            self._open_file()
+
+
+        file_idx = idx//self.chunk
+        off_idx = idx%self.chunk
+        
+        if not self.opened[file_idx]:
+            self.opened[file_idx] = h5py.File(self.file_list[file_idx], 'r')
+        hfile = self.opened[file_idx]
+        lim = len(hfile[self.imkey])
+        assert off_idx < lim, "offset %d for index %d is bigger than length %d of file %d: %s"%(off_idx, idx, lim, file_idx, self.file_list[file_idx])
         if self.format == 'HWC':
-            im = np.swapaxes(self.hfile[self.imkey][idx], 0, 2)
+            im = np.swapaxes(hfile[self.imkey][off_idx], 0, 2)
         else:
-            im = self.hfile[self.imkey][idx]
+            im = hfile[self.imkey][off_idx]
         if self.dered:
-            ebv = self.hfile['ebv'][idx]
+            ebv = hfile['ebv'][off_idx]
             im = self.deredden(im, ebv, self.format)
         return im.astype(np.float32), True
 

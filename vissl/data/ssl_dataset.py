@@ -13,7 +13,7 @@ from vissl.config import AttrDict
 from vissl.data import dataset_catalog
 from vissl.data.data_helper import balanced_sub_sampling, unbalanced_sub_sampling
 from vissl.data.ssl_transforms import get_transform
-from vissl.data.decals_h5_source import load_specz_labels
+from vissl.data.decals_h5_source import load_specz_labels, load_lens_labels
 from vissl.data.vissl_dataset_base import VisslDatasetBase
 from vissl.utils.env import get_machine_local_and_dist_rank
 
@@ -220,7 +220,7 @@ class GenericSSLDataset(VisslDatasetBase):
         In case of disk_folder, we use the ImageFolder object created during the
         data loading itself.
 
-        NEW: In case of decals (specz) labels, we pull labels once, directly from file.
+        NEW: In case of decals (specz or lens) labels, we pull labels once, directly from file.
         """
         local_rank, _ = get_machine_local_and_dist_rank()
         for idx, label_source in enumerate(self.label_sources):
@@ -250,15 +250,16 @@ class GenericSSLDataset(VisslDatasetBase):
                 # We do not create it again since it can be an expensive operation.
                 labels = [x[1] for x in self.data_objs[idx].image_dataset.samples]
                 labels = np.array(labels).astype(np.int64)
-            elif label_source == "decals_hdf5":
-                # Enforce that the data source also be decals_hdf5
-                assert self.data_sources[idx] == self.label_sources[idx], 'labels must come from same hdf5 source'
+            elif label_source == "decals_hdf5" or label_source == "decals_multihdf5":
                 if local_rank == 0:
                     logging.info(
                         f"Using {label_source} labels from {self.data_paths[idx]}"
                     )
-                # Pull directly from hdf5
-                labels = load_specz_labels(self.data_paths[idx], self.cfg)
+                # Pull directly from hdf5 for specz, or load npy for lens
+                if self.cfg["DATA"]["DECALS"]["H5KEY_LAB"] == 'external':
+                    labels = load_lens_labels(self.cfg["DATA"][self.split]["NPY_LABEL_PATH"])
+                else:
+                    labels = load_specz_labels(self.data_paths[idx], self.cfg)
                 labels = labels.astype(np.int64)
 
             elif label_source == "torchvision_dataset":
@@ -373,11 +374,14 @@ class GenericSSLDataset(VisslDatasetBase):
         # to its functionality.
         if (len(self.label_objs) > 0) or self.label_type == "standard":
             item["label"] = []
-            for label_source in self.label_objs:
+            for i, label_source in enumerate(self.label_objs):
                 if isinstance(label_source, list):
                     lbl = [entry[subset_idx] for entry in label_source]
                 else:
-                    lbl = _convert_lbl_to_long(label_source[subset_idx])
+                    if self.label_sources[i] == 'decals_multihdf5':
+                        lbl = _convert_lbl_to_long(label_source[idx])
+                    else:
+                        lbl = _convert_lbl_to_long(label_source[subset_idx])
                 item["label"].append(lbl)
         elif self.label_type == "sample_index":
             item["label"] = []
